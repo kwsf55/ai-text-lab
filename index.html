@@ -64,7 +64,7 @@ aside { padding:10px 20px }
 <small>일반 단어와 겹치는 이름은 여기에 적어 주세요. 따옴표나 겹낫표 안의 표현도 보존합니다.</small>
 </details>
 <button id="revise" disabled>수정하기</button>
-<div class="savebar"><button id="saveRecord">현재 기록 저장</button><small id="saveStatus" role="status"></small></div><h2>수정된 글</h2><div id="result"></div><small id="status" role="status"></small>
+<div class="savebar"><button id="saveRecord">현재 기록 저장</button><small id="saveStatus" role="status"></small></div><h2>수정된 글</h2><div id="result"></div><small id="status" role="status"></small><small id="dictionaryCredit" hidden>사전 자료 · <a href="https://krdict.korean.go.kr/" target="_blank" rel="noopener">국립국어원 한국어기초사전</a> · <a href="https://creativecommons.org/licenses/by-sa/2.0/kr/" target="_blank" rel="noopener">CC BY-SA 2.0 KR</a></small>
 </main></div></div>
 <script>
 const el = id => document.getElementById(id);
@@ -134,11 +134,84 @@ for (const [a,b] of [
 }
 
 const escapeRE = s => s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
-const keys = [...rules.keys()].sort((a,b)=>b.length-a.length);
-const pattern = keys.map(s=>s.split(' ').map(escapeRE).join('[ \\t]+')).join('|');
-const matcher = new RegExp(
-  '(?<![\\p{L}\\p{N}_])(?:'+pattern+')(?![\\p{L}\\p{N}_])','gu'
-);
+pairs(`
+이렇게 생각하면|이렇게 보면
+시각적으로|눈으로
+기억하기에는|기억하는 데는
+꽤|제법
+그리고|또
+첫째|첫 번째로
+둘째|두 번째로
+아주 긴 시간 동안|매우 오랜 시간에 걸쳐
+천천히|느리게
+고체이지|고체야
+튀어 오르지만|튀어 오르는 반면
+이에 대해서는|이에 관해서는
+이에 대해|이에 관해
+이를 통해|이것을 통해
+이러한|이와 같은
+그러한|그와 같은
+이처럼|이와 같이
+그처럼|그와 같이
+즉|다시 말해
+예컨대|예를 들어
+예를 들어|한 예로
+다시 말해서|다시 말해
+바꾸어 말하면|달리 말하면
+결과적으로|그 결과
+일반적으로|대체로
+구체적으로|구체적으로 말하면
+전체적으로|전반적으로
+지속적으로|꾸준히
+점진적으로|점차
+동시에|이와 동시에
+결국에는|결국
+사실상|실질적으로
+스스로|자신의 힘으로
+왜냐하면|그 까닭은
+굉장히|매우
+대단히|매우
+상당히|꽤
+충분히|넉넉히
+빠르게|신속하게
+정확하게|정확히
+명확하게|명확히
+적절하게|적절히
+분명하게|분명히
+자세하게|상세히
+신중하게|신중히
+간단하게|간단히
+자연스럽게|자연스레
+함께 같이|함께
+가장 최선의|최선의
+미리 사전에|미리
+다시 재차|다시
+먼저 우선|우선
+각각마다|각각
+하는 것이라고|하는 것이라
+하는 것이|하는 게
+할 것이|할 게
+하는 것을|하는 걸
+할 것을|할 걸
+하는 것은|하는 건
+할 것은|할 건
+것입니다|것이에요
+것이다|것이야
+할 필요가 있다|해야 한다
+할 필요가 있습니다|해야 합니다
+할 수 있다는 것이다|할 수 있다는 뜻이다
+할 수 있다는 점이다|할 수 있다는 것이다
+에 의해서|에 의해
+에 있어서|에서
+에 관하여|에 관해
+에 대하여|에 대해
+`);
+
+function compileRules(localRules) {
+  const keys=[...localRules.keys()].sort((a,b)=>b.length-a.length);
+  const pattern=keys.map(s=>s.split(' ').map(escapeRE).join('[ \\t]+')).join('|');
+  return new RegExp('(?<![\\p{L}\\p{N}_])(?:'+pattern+')(?![\\p{L}\\p{N}_])','gu');
+}
 
 function protectedText(text,names) {
   const mask=new Uint8Array(text.length);
@@ -157,7 +230,9 @@ function protectedText(text,names) {
   return mask;
 }
 
-function rewrite(text,names) {
+function rewrite(text,names,additions=[]) {
+  const localRules=new Map([...additions,...rules]);
+  const matcher=compileRules(localRules);
   const mask=protectedText(text,names), pieces=[];
   let cursor=0;
   for (const m of text.matchAll(matcher)) {
@@ -165,7 +240,7 @@ function rewrite(text,names) {
     if (mask.subarray(m.index,end).includes(1)) continue;
     pieces.push(
       {text:text.slice(cursor,m.index)},
-      {text:rules.get(m[0].replace(/[ \t]+/g,' ')),original:m[0]}
+      {text:localRules.get(m[0].replace(/[ \t]+/g,' ')),original:m[0]}
     );
     cursor=end;
   }
@@ -183,11 +258,34 @@ function clearResult() {
 
 for (const id of ['source','names']) el(id).addEventListener('input',clearResult);
 
-el('revise').onclick=()=>{
+el('revise').onclick=async()=>{
+  if(window.transforming)return;
+  window.transforming=true;
+  el('source').readOnly=el('names').readOnly=true;
+  el('revise').disabled=true;
+  const sourceSnapshot=el('source').value, namesSnapshot=el('names').value;
+  const additions=[];
+  let dictionaryMessage='사전 연결 전 · 기본 표현 규칙 적용';
+  if(window.dictionaryLookup) {
+    el('revise').disabled=true;
+    el('status').textContent='사전에서 유사 표현을 찾고 있습니다…';
+    try {
+      const result=await window.dictionaryLookup(sourceSnapshot,namesSnapshot);
+      additions.push(...result.additions);
+      dictionaryMessage=result.message;
+    } catch {
+      dictionaryMessage='사전 조회 실패 · 기본 표현 규칙 적용';
+    }
+  }
+  window.transforming=false;
+  el('source').readOnly=el('names').readOnly=false;
+  el('revise').disabled=false;
+  if(sourceSnapshot!==el('source').value || namesSnapshot!==el('names').value)return;
+
   hasChanges=true;
   const fragment=document.createDocumentFragment();
   let count=0;
-  for (const part of rewrite(el('source').value,el('names').value)) {
+  for (const part of rewrite(sourceSnapshot,namesSnapshot,additions)) {
     if (!part.original) {
       fragment.append(part.text);
       continue;
@@ -200,8 +298,9 @@ el('revise').onclick=()=>{
   }
   el('result').replaceChildren(fragment);
   el('status').textContent=count
-    ? count+'곳 변경 · 밑줄 친 표현의 의미를 확인하세요.'
-    : '적용할 수 있는 표현이 없어 원문을 유지했습니다.';
+    ? count+'곳 변경 · '+dictionaryMessage+' · 의미를 확인하세요.'
+    : dictionaryMessage+' · 의미를 유지할 수 있는 변경 규칙을 찾지 못했습니다.';
+  window.dispatchEvent(new Event('rewrite-complete'));
 };
 </script>
 
@@ -227,7 +326,7 @@ function accountMode() {
 get('switchAccount').onclick=()=>{signup=!signup;accountMode()};
 get('username').oninput=()=>{checked='';notice('authStatus','')};
 async function action(target,fn) {
-  if(busy)return;
+  if(busy || window.transforming)return;
   busy=true;
   document.querySelectorAll('button').forEach(b=>b.disabled=true);
   try { await fn() }
@@ -251,6 +350,30 @@ get('checkId').onclick=()=>action('authStatus',async()=>{
   checked=data?id:'';
   notice('authStatus',data?'사용 가능한 아이디입니다.':'이미 사용 중인 아이디입니다.');
 });
+
+window.dictionaryLookup=async(text,names)=>{
+  if(!db || !user)throw Error('로그인이 필요합니다.');
+  const mask=protectedText(text,names),candidates=[];
+  for(const m of text.matchAll(/[가-힣]{2,20}/gu)) {
+    if(mask.subarray(m.index,m.index+m[0].length).includes(1))continue;
+    candidates.push(m[0]);
+  }
+  const unique=[...new Set(candidates)];
+  const selected=unique.slice(0,24),additions=[];
+  let count=0;
+  for(let start=0;start<selected.length;start+=8) {
+    const {data,error}=await db.functions.invoke('dictionary-lookup',{body:{words:selected.slice(start,start+8)}});
+    if(error)throw error;
+    for(const item of data.items) {
+      if(item.replacement && item.word!==item.replacement) {
+        additions.push([item.word,item.replacement]);count++;
+      }
+    }
+  }
+  get('dictionaryCredit').hidden=false;
+  return {additions,message:'사전 후보 '+count+'개 확인'+(unique.length>24?' · 처음 24개 어절 조회':'')};
+};
+
 get('accountForm').onsubmit=e=>{
   e.preventDefault();
   action('authStatus',async()=>{
@@ -349,7 +472,7 @@ get('saveRecord').onclick=()=>action('saveStatus',async()=>{
   await loadHistory(true);
 });
 // 수정 버튼의 기존 변환 처리가 끝난 뒤 계정에 자동 저장한다.
-get('revise').addEventListener('click',()=>{
+window.addEventListener('rewrite-complete',()=>{
   if(user && !busy)get('saveRecord').click();
 });
 window.addEventListener('beforeunload',event=>{
