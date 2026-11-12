@@ -1,108 +1,171 @@
 <!doctype html>
 <html lang="ko">
-<head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>AI 텍스트 탐구 실험실</title>
 <style>
-* { box-sizing: border-box }
-body {
-  margin: 0; color: #17283a; background: #fafbfc;
-  font: 16px/1.75 "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
-}
-main { max-width: 760px; margin: 0 auto; padding: clamp(32px, 8vw, 84px) 20px }
-h1 { margin: 0 0 6px; font-size: clamp(28px, 5vw, 38px); line-height: 1.3; letter-spacing: -.055em }
-p { margin: 0 0 32px; color: #536477 }
-label, h2 { display: block; margin: 0 0 8px; font-size: 16px; font-weight: 700 }
-textarea, .result {
-  display: block; width: 100%; min-height: 170px; padding: 17px 19px;
-  border: 1px solid #cbd3dc; border-radius: 10px; background: white;
-  font: inherit; color: inherit; white-space: pre-wrap; overflow-wrap: anywhere;
-}
-textarea { resize: vertical }
-textarea::placeholder, .result:empty::before { color: #6a7888 }
-.result:empty::before { content: "수정한 글이 여기에 표시됩니다." }
-button {
-  margin: 14px 0 30px; padding: 10px 24px; min-height: 44px;
-  border: 0; border-radius: 8px; background: #195799;
-  color: white; font: inherit; font-weight: 650; cursor: pointer;
-}
-button:hover { background: #12457c }
-:focus-visible { outline: 3px solid #5192d2; outline-offset: 3px }
-button:disabled { background: #dce3eb; color: #536477; cursor: default }
-mark { background: #e1efff; color: #164c84; border-radius: 3px; text-decoration: underline }
-small { display: block; margin-top: 8px; color: #536477 }
+* { box-sizing:border-box }
+body { margin:0; background:#fafbfc; color:#17283a; font:16px/1.75 system-ui,sans-serif }
+main { max-width:760px; margin:auto; padding:clamp(32px,8vw,84px) 20px }
+h1 { margin:0; font-size:clamp(28px,5vw,38px); letter-spacing:-.05em }
+p,summary,small { color:#536477 }
+label,h2 { display:block; font-size:16px; font-weight:700; margin:12px 0 6px }
+textarea,input,#result { width:100%; padding:16px; background:white; border:1px solid #cbd3dc; border-radius:10px; color:inherit; font:inherit }
+textarea,#result { min-height:165px; white-space:pre-wrap; overflow-wrap:anywhere }
+textarea { display:block; resize:vertical }
+#result:empty::before { content:"수정한 글이 여기에 표시됩니다."; color:#687889 }
+details { margin:10px 0 }
+summary { cursor:pointer }
+button { padding:11px 24px; margin:6px 0 15px; background:#195799; color:white; font:inherit; border:0; border-radius:8px; cursor:pointer }
+button:disabled { background:#dce3eb; color:#536477 }
+mark { color:#164c84; background:#e1efff; text-decoration:underline }
 </style>
-</head>
-<body>
 <main>
-  <h1>AI 텍스트 탐구 실험실</h1>
-  <p>공백 기준으로 다섯 번째마다 유사 표현을 찾아 바꿉니다.</p>
-  <label for="source">원문</label>
-  <textarea id="source" placeholder="실험할 글을 입력하세요."></textarea>
-  <button id="revise" disabled>수정하기</button>
-  <h2 id="result-title">수정된 글</h2>
-  <div id="result" class="result" role="region" aria-labelledby="result-title"></div>
-  <small id="status" role="status"></small>
+<h1>AI 텍스트 탐구 실험실</h1>
+<p>글 전체에서 유사 표현을 찾아 바꾸고, 바뀐 부분에 밑줄을 표시합니다.</p>
+<label for="source">원문</label>
+<textarea id="source" placeholder="실험할 글을 입력하세요."></textarea>
+<details><summary>그대로 둘 이름·용어</summary>
+<label for="names">쉼표로 구분해 입력하세요</label>
+<input id="names" placeholder="예: 블리치, 영압, 나의 해방일지">
+<small>일반 단어와 겹치는 이름은 여기에 적어 주세요. 따옴표나 겹낫표 안의 표현도 보존합니다.</small>
+</details>
+<button id="revise" disabled>수정하기</button>
+<h2>수정된 글</h2><div id="result"></div><small id="status" role="status"></small>
 </main>
 <script>
-const source = document.querySelector('#source');
-const revise = document.querySelector('#revise');
-const result = document.querySelector('#result');
-const statusLine = document.querySelector('#status');
+const el = id => document.getElementById(id);
+const rules = new Map();
 
-// 조사가 달라지는 표현은 실제로 쓸 어절을 짝지어 등록한다.
-const forms = new Map(Object.entries({
-  '데이터': '자료', '데이터를': '자료를', '데이터는': '자료는', '데이터가': '자료가',
-  '결과를': '결과물을', '방법': '방식', '방법을': '방식을', '방법은': '방식은',
-  '방법으로': '방식으로', '과정': '절차', '특징': '특성', '특징을': '특성을',
-  '시스템': '체계', '시스템을': '체계를', '다양한': '여러', '중요한': '주요한',
-  '또한': '아울러', '그러나': '하지만', '따라서': '그러므로', '특히': '그중에서도'
-}));
-const verbPairs = [
-  ['사용', '활용'], ['이용', '사용'], ['활용', '이용'],
-  ['확인', '점검'], ['설명', '해설'], ['비교', '대조']
+function pairs(lines) {
+  for (const line of lines.trim().split('\n')) {
+    const [from,to] = line.split('|');
+    rules.set(from,to);
+  }
+}
+
+pairs(`
+결론적으로|결론부터 말하면
+단순히|그저
+또한|아울러
+그러나|하지만
+따라서|그러므로
+만약에|만일
+매우|무척
+서로 간에|서로
+다시 한 번 더|다시 한 번
+예를 들면|예를 하나 들면
+이 경우|이 경우에
+이 경우에는|이 경우엔
+그중에서도|그중
+다양한|여러
+중요한|주요한
+점차적으로|점차
+대부분의 경우|대개
+승패를 가르는|승패를 결정짓는
+이해하시면 됩니다|이해할 수 있습니다
+그뿐만 아니라|그뿐 아니라
+할 수 있기 때문에|할 수 있으므로
+그 이유는 바로|그 이유는
+`);
+
+// 왼쪽 명사와 오른쪽 명사의 받침에 맞게 조사도 맞춘다.
+const nouns = [
+  ['데이터','자료'],['방법','방식'],['특징','특성'],
+  ['과정','절차'],['시스템','체계'],['요소','요인'],['전투','싸움'],
+  ['차이점','차이'],['관점','시각'],['까닭','이유']
 ];
-for (const [from, to] of verbPairs) {
-  for (const ending of ['하다','한다','하는','한','할','하면','하며','하고','하여','해서',
-    '했다','하였다','합니다','했습니다','하였습니다','하기','하므로','하는데']) {
-    forms.set(from + ending, to + ending);
+
+function particle(noun,pair) {
+  const tail=(noun.charCodeAt(noun.length-1)-44032)%28;
+  return pair.split('/')[tail && !(pair==='으로/로' && tail===8)?0:1];
+}
+
+for (const [a,b] of nouns) {
+  for (const suffix of ['', '의','에','에서','까지','부터','에도','에서는']) {
+    rules.set(a+suffix,b+suffix);
+  }
+  for (const pair of ['이/가','은/는','을/를','과/와','으로/로','이라고/라고']) {
+    rules.set(a+particle(a,pair),b+particle(b,pair));
+  }
+  rules.set(a+'에 대해',b+'에 관해');
+}
+
+for (const [a,b] of [
+  ['사용','활용'],['이용','사용'],['활용','이용'],['확인','점검'],
+  ['비교','대조'],['설명','해설'],['선택','채택'],['시작','개시'],['종료','마무리']
+]) {
+  for (const end of '하다 한다 하는 한 할 하면 하며 하고 하여 해서 했다 하였다 합니다 했습니다 하였습니다 하기 하므로 하는데 하거나 하면서 합니다만'.split(' ')) {
+    rules.set(a+end,b+end);
   }
 }
-function substitute(token) {
-  const parts = token.match(/^([^\p{L}\p{N}]*)([\p{L}\p{N}]+)([^\p{L}\p{N}]*)$/u);
-  if (!parts || !forms.has(parts[2])) return token;
-  return parts[1] + forms.get(parts[2]) + parts[3];
-}
-source.addEventListener('input', () => {
-  revise.disabled = !source.value.trim();
-  result.replaceChildren();
-  statusLine.textContent = '';
-});
-revise.addEventListener('click', () => {
-  const fragment = document.createDocumentFragment();
-  let position = 0, changed = 0;
-  for (const part of source.value.match(/\s+|\S+/gu) || []) {
-    if (/\S/u.test(part)) {
-      position++;
-      const next = position % 5 === 0 ? substitute(part) : part;
-      if (next !== part) {
-        const mark = document.createElement('mark');
-        mark.textContent = next;
-        mark.title = position + '번째 · 원래 표현 ‘' + part + '’';
-        fragment.append(mark);
-        changed++;
-        continue;
-      }
+
+const escapeRE = s => s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+const keys = [...rules.keys()].sort((a,b)=>b.length-a.length);
+const pattern = keys.map(s=>s.split(' ').map(escapeRE).join('[ \\t]+')).join('|');
+const matcher = new RegExp(
+  '(?<![\\p{L}\\p{N}_])(?:'+pattern+')(?![\\p{L}\\p{N}_])','gu'
+);
+
+function protectedText(text,names) {
+  const mask=new Uint8Array(text.length);
+  for (const m of text.matchAll(/“[^”]*”|‘[^’]*’|「[^」]*」|『[^』]*』|"[^"\n]*"|'[^'\n]*'|《[^》]*》|https?:\/\/[^\s]+/gu)) {
+    mask.fill(1,m.index,m.index+m[0].length);
+  }
+  for (const name of new Set(
+    ['블리치','영압',...names.split(/[,\n]/)].map(s=>s.trim()).filter(Boolean)
+  )) {
+    let start=0;
+    while ((start=text.indexOf(name,start))!==-1) {
+      mask.fill(1,start,start+name.length);
+      start+=name.length;
     }
-    fragment.append(part);
   }
-  result.replaceChildren(fragment);
-  statusLine.textContent = changed
-    ? changed + '곳 변경 · 파란 밑줄의 표현이 문맥에 맞는지 확인하세요.'
-    : position < 5 ? '5단어 미만이라 원문을 그대로 표시했습니다.'
-    : '변경 대상에 등록된 유사 표현이 없어 원문을 그대로 표시했습니다.';
-});
+  return mask;
+}
+
+function rewrite(text,names) {
+  const mask=protectedText(text,names), pieces=[];
+  let cursor=0;
+  for (const m of text.matchAll(matcher)) {
+    const end=m.index+m[0].length;
+    if (mask.subarray(m.index,end).includes(1)) continue;
+    pieces.push(
+      {text:text.slice(cursor,m.index)},
+      {text:rules.get(m[0].replace(/[ \t]+/g,' ')),original:m[0]}
+    );
+    cursor=end;
+  }
+  pieces.push({text:text.slice(cursor)});
+  return pieces;
+}
+
+function clearResult() {
+  el('revise').disabled=!el('source').value.trim();
+  el('result').replaceChildren();
+  el('status').textContent='';
+}
+
+for (const id of ['source','names']) el(id).addEventListener('input',clearResult);
+
+el('revise').onclick=()=>{
+  const fragment=document.createDocumentFragment();
+  let count=0;
+  for (const part of rewrite(el('source').value,el('names').value)) {
+    if (!part.original) {
+      fragment.append(part.text);
+      continue;
+    }
+    const mark=document.createElement('mark');
+    mark.textContent=part.text;
+    mark.title='원래 표현: '+part.original;
+    fragment.append(mark);
+    count++;
+  }
+  el('result').replaceChildren(fragment);
+  el('status').textContent=count
+    ? count+'곳 변경 · 밑줄 친 표현의 의미를 확인하세요.'
+    : '적용할 수 있는 표현이 없어 원문을 유지했습니다.';
+};
 </script>
-</body>
 </html>
