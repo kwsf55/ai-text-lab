@@ -19,8 +19,41 @@ summary { cursor:pointer }
 button { padding:11px 24px; margin:6px 0 15px; background:#195799; color:white; font:inherit; border:0; border-radius:8px; cursor:pointer }
 button:disabled { background:#dce3eb; color:#536477 }
 mark { color:#164c84; background:#e1efff; text-decoration:underline }
+
+[hidden] { display:none !important }
+.gate { max-width:540px; margin:70px auto; padding:20px }
+.gate input { min-width:0 }
+.gate button { margin-top:18px }
+.idrow { display:flex; gap:8px; align-items:baseline }
+.idrow input { flex:1 }
+.idrow button { flex-shrink:0 }
+.accountbar { max-width:1150px; margin:auto; padding:14px 20px; display:flex; justify-content:space-between; align-items:center }
+.workspace { display:grid; grid-template-columns:220px minmax(0,760px); gap:28px; max-width:1060px; margin:auto }
+.workspace main { width:100%; padding-top:22px }
+aside { padding:22px 15px; overflow-wrap:anywhere }
+aside article { border-bottom:1px solid #dce3eb; padding:10px 0 }
+aside article button { display:block; background:transparent; color:#195799; text-align:left; padding:4px; margin:0; width:100% }
+.savebar { display:flex; gap:12px; flex-wrap:wrap; align-items:center; margin-top:14px }
+:focus-visible { outline:3px solid #4389cf; outline-offset:3px }
+@media(max-width:700px) {
+.workspace { display:flex; flex-direction:column; gap:0 }
+aside { padding:10px 20px }
+#history { max-height:180px; overflow:auto }
+.gate { margin-top:25px }
+}
 </style>
-<main>
+<div id="accountGate" class="gate">
+<h1>AI 텍스트 탐구 실험실</h1><p>로그인하고 지난 수정 기록을 이어서 확인하세요.</p>
+<form id="accountForm">
+<label for="username">아이디</label>
+<div class="idrow"><input id="username" autocomplete="username" minlength="4" maxlength="20" pattern="[a-zA-Z0-9_]{4,20}" required placeholder="영문·숫자·밑줄 4~20자"><button type="button" id="checkId">중복 확인</button></div>
+<label for="password">비밀번호</label><input type="password" id="password" autocomplete="current-password" minlength="10" maxlength="128" required placeholder="10자 이상">
+<div id="signupExtra" hidden><label for="passwordAgain">비밀번호 확인</label><input type="password" id="passwordAgain" autocomplete="new-password"><small>이메일을 수집하지 않아 이메일 비밀번호 찾기는 지원하지 않습니다. 아이디와 비밀번호를 보관하세요.</small></div>
+<button type="submit" id="submitAccount">로그인</button><button type="button" id="switchAccount">회원가입하기</button>
+</form><p id="authStatus" role="status"></p>
+</div>
+<div id="application" hidden><div class="accountbar"><span id="accountName"></span><button id="signout">로그아웃</button></div>
+<div class="workspace"><aside><button id="newRecord">새 글</button><h2>내 기록</h2><button id="reloadRecords">목록 새로고침</button><div id="history"></div><button id="moreRecords" hidden>더 보기</button></aside><main>
 <h1>AI 텍스트 탐구 실험실</h1>
 <p>글 전체에서 유사 표현을 찾아 바꾸고, 바뀐 부분에 밑줄을 표시합니다.</p>
 <label for="source">원문</label>
@@ -31,8 +64,8 @@ mark { color:#164c84; background:#e1efff; text-decoration:underline }
 <small>일반 단어와 겹치는 이름은 여기에 적어 주세요. 따옴표나 겹낫표 안의 표현도 보존합니다.</small>
 </details>
 <button id="revise" disabled>수정하기</button>
-<h2>수정된 글</h2><div id="result"></div><small id="status" role="status"></small>
-</main>
+<div class="savebar"><button id="saveRecord">현재 기록 저장</button><small id="saveStatus" role="status"></small></div><h2>수정된 글</h2><div id="result"></div><small id="status" role="status"></small>
+</main></div></div>
 <script>
 const el = id => document.getElementById(id);
 const rules = new Map();
@@ -140,7 +173,9 @@ function rewrite(text,names) {
   return pieces;
 }
 
+let hasChanges=false;
 function clearResult() {
+  hasChanges=true;
   el('revise').disabled=!el('source').value.trim();
   el('result').replaceChildren();
   el('status').textContent='';
@@ -149,6 +184,7 @@ function clearResult() {
 for (const id of ['source','names']) el(id).addEventListener('input',clearResult);
 
 el('revise').onclick=()=>{
+  hasChanges=true;
   const fragment=document.createDocumentFragment();
   let count=0;
   for (const part of rewrite(el('source').value,el('names').value)) {
@@ -167,5 +203,172 @@ el('revise').onclick=()=>{
     ? count+'곳 변경 · 밑줄 친 표현의 의미를 확인하세요.'
     : '적용할 수 있는 표현이 없어 원문을 유지했습니다.';
 };
+</script>
+
+
+<script type="module">
+// Supabase 프로젝트의 공개 연결 정보만 입력하세요.
+const SUPABASE_URL = 'https://txwriuyoctzkcvcylffb.supabase.co';
+const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_cPMZ3zGQ8acQJ2VijuP94w_QcjsorGf';
+const get = id => document.getElementById(id);
+let db, user, signup=false, checked='', current=null, cursor=null, busy=false;
+const accountPattern=/^[a-z0-9_]{4,20}$/;
+const username=()=>get('username').value.trim().toLowerCase();
+const address=id=>id+'@accounts.ai-text-lab.invalid';
+const notice=(id,message)=>{get(id).textContent=message};
+function accountMode() {
+  get('signupExtra').hidden=!signup;
+  get('passwordAgain').required=signup;
+  get('password').autocomplete=signup?'new-password':'current-password';
+  get('submitAccount').textContent=signup?'회원가입':'로그인';
+  get('switchAccount').textContent=signup?'로그인으로 돌아가기':'회원가입하기';
+  notice('authStatus','');
+}
+get('switchAccount').onclick=()=>{signup=!signup;accountMode()};
+get('username').oninput=()=>{checked='';notice('authStatus','')};
+async function action(target,fn) {
+  if(busy)return;
+  busy=true;
+  document.querySelectorAll('button').forEach(b=>b.disabled=true);
+  try { await fn() }
+  catch(e) { notice(target,e.message || '연결에 실패했습니다. 다시 시도하세요.') }
+  finally {
+    busy=false;
+    document.querySelectorAll('button').forEach(b=>b.disabled=false);
+    get('revise').disabled=!get('source').value.trim();
+  }
+}
+function validId() {
+  const id=username();
+  if(!accountPattern.test(id))throw Error('아이디는 영문·숫자·밑줄 4~20자로 입력하세요. 대소문자는 구분하지 않습니다.');
+  return id;
+}
+get('checkId').onclick=()=>action('authStatus',async()=>{
+  if(!db)throw Error('먼저 Supabase 연결 설정이 필요합니다.');
+  const id=validId();
+  const {data,error}=await db.rpc('lab_username_available',{candidate:id});
+  if(error)throw Error('중복 확인 실패. 연결과 데이터베이스 설정을 확인하세요.');
+  checked=data?id:'';
+  notice('authStatus',data?'사용 가능한 아이디입니다.':'이미 사용 중인 아이디입니다.');
+});
+get('accountForm').onsubmit=e=>{
+  e.preventDefault();
+  action('authStatus',async()=>{
+    if(!db)throw Error('먼저 Supabase 연결 설정이 필요합니다.');
+    const id=validId(),password=get('password').value;
+    if(signup && checked!==id)throw Error('아이디 중복 확인을 먼저 눌러주세요.');
+    if(signup && password!==get('passwordAgain').value)throw Error('두 비밀번호가 다릅니다.');
+    const credentials={email:address(id),password};
+    const {data,error}=signup?await db.auth.signUp(credentials):await db.auth.signInWithPassword(credentials);
+    if(error)throw Error(signup?'가입 실패. 아이디 중복·비밀번호 설정·가입 요청 제한을 확인하세요.':'로그인 실패. 아이디와 비밀번호를 확인하세요.');
+    if(!data.session)throw Error('Supabase에서 이메일 확인 설정을 꺼야 아이디로 가입할 수 있습니다.');
+    get('password').value=get('passwordAgain').value='';
+    hasChanges=false;
+    await showSession(data.session);
+  });
+};
+function discard() { return !hasChanges || confirm('저장하지 않은 변경을 지우고 이동할까요?') }
+function reset() {
+  current=null;
+  get('source').value=get('names').value='';
+  clearResult();
+  hasChanges=false;
+  notice('saveStatus','새 기록');
+}
+async function showSession(session) {
+  user=session?.user||null;
+  get('accountGate').hidden=!!user;
+  get('application').hidden=!user;
+  get('history').replaceChildren();
+  reset();
+  if(!user)return;
+  get('accountName').textContent=user.email.split('@')[0]+'님의 실험실';
+  await loadHistory(true);
+}
+get('signout').onclick=()=>action('saveStatus',async()=>{
+  if(!discard())return;
+  const {error}=await db.auth.signOut({scope:'local'});
+  if(error)throw Error('로그아웃에 실패했습니다. 다시 시도하세요.');
+  await showSession(null);
+});
+get('newRecord').onclick=()=>{if(discard())reset()};
+get('reloadRecords').onclick=()=>action('saveStatus',()=>loadHistory(true));
+get('moreRecords').onclick=()=>action('saveStatus',()=>loadHistory(false));
+async function loadHistory(first) {
+  let query=db.from('lab_history').select('id,title,updated_at').order('id',{ascending:false}).limit(30);
+  if(!first && cursor)query=query.lt('id',cursor);
+  const {data,error}=await query;
+  if(error)throw Error('기록 목록을 불러오지 못했습니다. 로그인 상태와 연결을 확인하세요.');
+  if(first)get('history').replaceChildren();
+  for(const row of data) {
+    const entry=document.createElement('article'),button=document.createElement('button'),date=document.createElement('small');
+    button.textContent=row.title;
+    button.onclick=()=>action('saveStatus',async()=>{
+      if(!discard())return;
+      const {data,error}=await db.from('lab_history').select('*').eq('id',row.id).single();
+      if(error)throw Error('기록을 열지 못했습니다. 목록을 새로고침하세요.');
+      current=data;
+      get('source').value=data.source;
+      get('names').value=data.protected_names;
+      clearResult();
+      const fragment=document.createDocumentFragment();
+      for(const part of data.parts) {
+        if(part.original) {
+          const mark=document.createElement('mark');
+          mark.textContent=part.text;mark.title='원래 표현: '+part.original;fragment.append(mark);
+        } else fragment.append(part.text);
+      }
+      get('result').replaceChildren(fragment);
+      hasChanges=false;
+      notice('saveStatus','저장된 기록을 열었습니다.');
+    });
+    date.textContent=new Date(row.updated_at).toLocaleString('ko-KR');
+    entry.append(button,date);get('history').append(entry);
+  }
+  if(first && !data.length)get('history').textContent='저장된 기록이 없습니다.';
+  cursor=data.at(-1)?.id||cursor;
+  get('moreRecords').hidden=data.length<30;
+}
+get('saveRecord').onclick=()=>action('saveStatus',async()=>{
+  const source=get('source').value;
+  if(!source.trim())throw Error('원문을 입력하세요.');
+  if(source.length>100000)throw Error('한 기록은 10만 자까지 저장할 수 있습니다.');
+  const parts=[...get('result').childNodes].map(node=>node.nodeType===3?{text:node.textContent}:
+    {text:node.textContent,original:node.title.replace(/^원래 표현: /,'')});
+  const record={
+    owner:user.id,title:source.trim().slice(0,50),source,
+    protected_names:get('names').value,parts,
+    version:(current?.version||0)+1
+  };
+  let query=current?db.from('lab_history').update(record).eq('id',current.id).eq('version',current.version):
+    db.from('lab_history').insert(record);
+  const {data,error}=await query.select().single();
+  if(error)throw Error('저장에 실패했습니다. 연결을 확인하세요. 다른 기기에서 수정했다면 새 글로 저장해 주세요.');
+  current=data;hasChanges=false;
+  notice('saveStatus','계정에 저장했습니다.');
+  await loadHistory(true);
+});
+// 수정 버튼의 기존 변환 처리가 끝난 뒤 계정에 자동 저장한다.
+get('revise').addEventListener('click',()=>{
+  if(user && !busy)get('saveRecord').click();
+});
+window.addEventListener('beforeunload',event=>{
+  if(hasChanges){event.preventDefault();event.returnValue=''}
+});
+if(!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) {
+  notice('authStatus','계정 기능을 준비 중입니다. Supabase 연결 설정이 필요합니다.');
+} else {
+  try {
+    const {createClient}=await import('https://esm.sh/@supabase/supabase-js@2.49.8');
+    db=createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY);
+    const {data,error}=await db.auth.getSession();
+    if(error)throw error;
+    await showSession(data.session);
+    db.auth.onAuthStateChange((event,session)=>{
+      if(event==='SIGNED_OUT' && user)void showSession(null);
+    });
+  } catch { notice('authStatus','계정 서비스 연결에 실패했습니다. 주소·공개 키·인터넷 연결을 확인하세요.') }
+}
+
 </script>
 </html>
