@@ -1,389 +1,107 @@
-
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ko">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AI 텍스트 탐구 실험실</title>
 <style>
-* { box-sizing: border-box; }
+* { box-sizing: border-box }
 body {
-  margin: 0;
-  padding: 24px;
-  font-family: Arial, "Malgun Gothic", sans-serif;
-  background: #f3f5f9;
-  color: #202938;
+  margin: 0; color: #17283a; background: #fafbfc;
+  font: 16px/1.75 "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
 }
-.container {
-  max-width: 1000px;
-  margin: auto;
+main { max-width: 760px; margin: 0 auto; padding: clamp(32px, 8vw, 84px) 20px }
+h1 { margin: 0 0 6px; font-size: clamp(28px, 5vw, 38px); line-height: 1.3; letter-spacing: -.055em }
+p { margin: 0 0 32px; color: #536477 }
+label, h2 { display: block; margin: 0 0 8px; font-size: 16px; font-weight: 700 }
+textarea, .result {
+  display: block; width: 100%; min-height: 170px; padding: 17px 19px;
+  border: 1px solid #cbd3dc; border-radius: 10px; background: white;
+  font: inherit; color: inherit; white-space: pre-wrap; overflow-wrap: anywhere;
 }
-h1 { margin-bottom: 8px; }
-.subtitle { color: #657184; margin-bottom: 28px; }
-.card {
-  background: white;
-  padding: 22px;
-  border-radius: 14px;
-  margin-bottom: 18px;
-  box-shadow: 0 2px 9px rgba(0,0,0,.05);
-}
-h2 { font-size: 19px; margin-top: 0; }
-textarea, input, select {
-  width: 100%;
-  padding: 11px;
-  border: 1px solid #ccd3df;
-  border-radius: 8px;
-  font-size: 14px;
-  margin-top: 7px;
-}
-textarea { min-height: 130px; resize: vertical; }
+textarea { resize: vertical }
+textarea::placeholder, .result:empty::before { color: #6a7888 }
+.result:empty::before { content: "수정한 글이 여기에 표시됩니다." }
 button {
-  padding: 10px 15px;
-  border: 0;
-  border-radius: 8px;
-  background: #315fcb;
-  color: white;
-  cursor: pointer;
-  font-size: 14px;
-  margin-top: 10px;
+  margin: 14px 0 30px; padding: 10px 24px; min-height: 44px;
+  border: 0; border-radius: 8px; background: #195799;
+  color: white; font: inherit; font-weight: 650; cursor: pointer;
 }
-button:hover { background: #244ca8; }
-button.secondary { background: #68758a; }
-button.green { background: #21845b; }
-.small { font-size: 13px; color: #68758a; }
-.stat {
-  display: inline-block;
-  padding: 9px 13px;
-  background: #edf2ff;
-  border-radius: 8px;
-  margin: 5px 5px 5px 0;
-  font-size: 14px;
-}
-.target {
-  border: 1px solid #e0e5ed;
-  padding: 13px;
-  border-radius: 10px;
-  margin-top: 10px;
-}
-.target strong { color: #315fcb; }
-.preview {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  background: #f6f7fa;
-  border-radius: 9px;
-  padding: 14px;
-  min-height: 70px;
-  line-height: 1.7;
-}
-.grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 15px;
-}
-label { display: block; margin-top: 10px; font-size: 14px; }
-hr { border: 0; border-top: 1px solid #e6e9ef; margin: 18px 0; }
-@media(max-width:650px) {
-  body { padding: 12px; }
-  .grid { grid-template-columns: 1fr; }
-}
+button:hover { background: #12457c }
+:focus-visible { outline: 3px solid #5192d2; outline-offset: 3px }
+button:disabled { background: #dce3eb; color: #536477; cursor: default }
+mark { background: #e1efff; color: #164c84; border-radius: 3px; text-decoration: underline }
+small { display: block; margin-top: 8px; color: #536477 }
 </style>
 </head>
 <body>
-<div class="container">
-
-<h1>AI 텍스트 탐구 실험실</h1>
-<p class="subtitle">텍스트의 표현과 형식 변화에 따른 AI 탐지 결과를 비교하는 실험 도구</p>
-
-<div class="card">
-<h2>1. 원문 입력</h2>
-<p class="small">실험에 사용할 원본 문장을 입력하세요.</p>
-<textarea id="original" placeholder="여기에 원본 텍스트를 입력하세요."></textarea>
-<button onclick="analyzeText()">텍스트 분석하기</button>
-<div id="stats"></div>
-</div>
-
-<div class="card">
-<h2>2. 단어 변경 실험</h2>
-<p class="small">
-공백을 기준으로 단어를 구분하며, 5번째 단어마다 변경 대상으로 표시합니다.
-추천 표현은 참고용이며 문맥에 적합한지 확인한 후 선택하세요.
-</p>
-<div id="targets">
-<p class="small">먼저 원문을 입력하고 텍스트 분석하기를 눌러주세요.</p>
-</div>
-</div>
-
-<div class="card">
-<h2>3. 원문과 수정문 비교</h2>
-<div class="grid">
-  <div>
-    <strong>원문</strong>
-    <div class="preview" id="originalPreview">원문이 여기에 표시됩니다.</div>
-  </div>
-  <div>
-    <strong>수정문</strong>
-    <div class="preview" id="modifiedPreview">수정문이 여기에 표시됩니다.</div>
-  </div>
-</div>
-</div>
-
-<div class="card">
-<h2>4. 띄어쓰기 변경 실험</h2>
-<p class="small">단어 자체는 유지하고 공백 형태만 변경합니다.</p>
-<select id="spacingMode" onchange="makeSpacing()">
-  <option value="normal">기본 띄어쓰기 유지</option>
-  <option value="double">단어 사이 공백 두 칸</option>
-  <option value="line">단어 사이 줄바꿈</option>
-</select>
-<div class="preview" id="spacingPreview">띄어쓰기 변경 결과가 여기에 표시됩니다.</div>
-<button class="secondary" onclick="copySpacing()">띄어쓰기 결과 복사</button>
-</div>
-
-<div class="card">
-<h2>5. AI 탐지 결과 기록</h2>
-<p class="small">외부 AI 탐지 도구에서 확인한 결과를 직접 입력하세요.</p>
-<div class="grid">
-  <div>
-    <label>원문 탐지 결과 (%)</label>
-    <input id="originalScore" type="number" min="0" max="100" placeholder="예: 75">
-  </div>
-  <div>
-    <label>수정문 탐지 결과 (%)</label>
-    <input id="modifiedScore" type="number" min="0" max="100" placeholder="예: 42">
-  </div>
-</div>
-<label>실험 메모</label>
-<textarea id="memo" placeholder="실험 과정이나 결과에 대한 메모를 입력하세요."></textarea>
-<button class="green" onclick="downloadCSV()">실험 결과 CSV 다운로드</button>
-</div>
-
-</div>
-
+<main>
+  <h1>AI 텍스트 탐구 실험실</h1>
+  <p>공백 기준으로 다섯 번째마다 유사 표현을 찾아 바꿉니다.</p>
+  <label for="source">원문</label>
+  <textarea id="source" placeholder="실험할 글을 입력하세요."></textarea>
+  <button id="revise" disabled>수정하기</button>
+  <h2 id="result-title">수정된 글</h2>
+  <div id="result" class="result" role="region" aria-labelledby="result-title"></div>
+  <small id="status" role="status"></small>
+</main>
 <script>
-const synonymDictionary = {
-  "중요하다": ["필요하다", "의미 있다", "큰 비중을 차지하다"],
-  "중요한": ["필요한", "의미 있는", "핵심적인"],
-  "생각하다": ["여기다", "판단하다", "고려하다"],
-  "말하다": ["설명하다", "이야기하다", "언급하다"],
-  "보여주다": ["나타내다", "드러내다", "제시하다"],
-  "사용하다": ["활용하다", "이용하다", "적용하다"],
-  "만들다": ["제작하다", "구성하다", "형성하다"],
-  "분석하다": ["살펴보다", "검토하다", "조사하다"],
-  "결과": ["성과", "결론", "산출물"],
-  "방법": ["방식", "절차", "수단"],
-  "문제": ["과제", "어려움", "쟁점"],
-  "영향": ["효과", "작용", "변화"],
-  "증가하다": ["늘어나다", "높아지다", "확대되다"],
-  "감소하다": ["줄어들다", "낮아지다", "축소되다"],
-  "빠르다": ["신속하다", "속도가 높다", "재빠르다"],
-  "느리다": ["천천히 진행되다", "속도가 낮다"],
-  "다양하다": ["여러 가지이다", "폭넓다", "여러 형태이다"],
-  "설명하다": ["해설하다", "풀이하다", "알려주다"],
-  "확인하다": ["살펴보다", "점검하다", "검토하다"],
-  "발생하다": ["일어나다", "나타나다", "생기다"],
-  "이용하다": ["활용하다", "사용하다", "적용하다"],
-  "필요하다": ["요구되다", "중요하다", "요구된다"],
-  "가능하다": ["할 수 있다", "실현할 수 있다"],
-  "문장을": ["글을", "표현을"],
-  "인공지능": ["AI", "인공 지능"],
-  "데이터": ["자료", "정보"],
-  "학습": ["훈련", "배움"],
-  "기술": ["기법", "방법", "기술력"],
-  "시스템": ["체계", "구조", "장치"],
-  "과정": ["절차", "단계", "흐름"],
-  "특징": ["성질", "특성", "모습"],
-  "활용": ["이용", "적용", "사용"],
-  "변화": ["변동", "차이", "변형"],
-  "개발": ["제작", "구축", "연구"]
-};
+const source = document.querySelector('#source');
+const revise = document.querySelector('#revise');
+const result = document.querySelector('#result');
+const statusLine = document.querySelector('#status');
 
-let originalTokens = [];
-let replacementValues = {};
-
-function analyzeText() {
-  const text = document.getElementById("original").value;
-  originalTokens = text.match(/\S+/g) || [];
-  replacementValues = {};
-
-  document.getElementById("stats").innerHTML =
-    `<span class="stat">전체 단어 수: ${originalTokens.length}개</span>
-     <span class="stat">변경 대상: ${Math.floor(originalTokens.length / 5)}개</span>`;
-
-  document.getElementById("originalPreview").textContent =
-    text || "원문이 없습니다.";
-
-  renderTargets();
-  updateModified();
-  makeSpacing();
-}
-
-function getWordParts(token) {
-  const match = token.match(/^([^\p{L}\p{N}]*)([\p{L}\p{N}]+)([^\p{L}\p{N}]*)$/u);
-  if (!match) return null;
-  return {
-    prefix: match[1],
-    word: match[2],
-    suffix: match[3]
-  };
-}
-
-function renderTargets() {
-  const area = document.getElementById("targets");
-  area.innerHTML = "";
-
-  const targetIndexes = [];
-  for (let i = 4; i < originalTokens.length; i += 5) {
-    targetIndexes.push(i);
+// 조사가 달라지는 표현은 실제로 쓸 어절을 짝지어 등록한다.
+const forms = new Map(Object.entries({
+  '데이터': '자료', '데이터를': '자료를', '데이터는': '자료는', '데이터가': '자료가',
+  '결과를': '결과물을', '방법': '방식', '방법을': '방식을', '방법은': '방식은',
+  '방법으로': '방식으로', '과정': '절차', '특징': '특성', '특징을': '특성을',
+  '시스템': '체계', '시스템을': '체계를', '다양한': '여러', '중요한': '주요한',
+  '또한': '아울러', '그러나': '하지만', '따라서': '그러므로', '특히': '그중에서도'
+}));
+const verbPairs = [
+  ['사용', '활용'], ['이용', '사용'], ['활용', '이용'],
+  ['확인', '점검'], ['설명', '해설'], ['비교', '대조']
+];
+for (const [from, to] of verbPairs) {
+  for (const ending of ['하다','한다','하는','한','할','하면','하며','하고','하여','해서',
+    '했다','하였다','합니다','했습니다','하였습니다','하기','하므로','하는데']) {
+    forms.set(from + ending, to + ending);
   }
-
-  if (targetIndexes.length === 0) {
-    area.innerHTML = '<p class="small">변경 대상 단어가 없습니다. 단어를 5개 이상 입력하세요.</p>';
-    return;
+}
+function substitute(token) {
+  const parts = token.match(/^([^\p{L}\p{N}]*)([\p{L}\p{N}]+)([^\p{L}\p{N}]*)$/u);
+  if (!parts || !forms.has(parts[2])) return token;
+  return parts[1] + forms.get(parts[2]) + parts[3];
+}
+source.addEventListener('input', () => {
+  revise.disabled = !source.value.trim();
+  result.replaceChildren();
+  statusLine.textContent = '';
+});
+revise.addEventListener('click', () => {
+  const fragment = document.createDocumentFragment();
+  let position = 0, changed = 0;
+  for (const part of source.value.match(/\s+|\S+/gu) || []) {
+    if (/\S/u.test(part)) {
+      position++;
+      const next = position % 5 === 0 ? substitute(part) : part;
+      if (next !== part) {
+        const mark = document.createElement('mark');
+        mark.textContent = next;
+        mark.title = position + '번째 · 원래 표현 ‘' + part + '’';
+        fragment.append(mark);
+        changed++;
+        continue;
+      }
+    }
+    fragment.append(part);
   }
-
-  targetIndexes.forEach(index => {
-    const token = originalTokens[index];
-    const parts = getWordParts(token);
-    const word = parts ? parts.word : token;
-    const key = word.toLowerCase();
-    const suggestions = synonymDictionary[key] || [];
-
-    const div = document.createElement("div");
-    div.className = "target";
-
-    const title = document.createElement("strong");
-    title.textContent = `${index + 1}번째 단어: ${token}`;
-    div.appendChild(title);
-
-    const select = document.createElement("select");
-    select.dataset.index = index;
-
-    const first = document.createElement("option");
-    first.value = "";
-    first.textContent = suggestions.length
-      ? "추천 표현을 선택하세요"
-      : "등록된 추천 표현이 없습니다.";
-    select.appendChild(first);
-
-    suggestions.forEach(suggestion => {
-      const option = document.createElement("option");
-      option.value = suggestion;
-      option.textContent = suggestion;
-      select.appendChild(option);
-    });
-
-    select.value = replacementValues[index] || "";
-    select.addEventListener("change", () => {
-      replacementValues[index] = select.value;
-      const manual = div.querySelector(".manual");
-      if (manual) manual.value = "";
-      updateModified();
-    });
-    div.appendChild(select);
-
-    const manualLabel = document.createElement("p");
-    manualLabel.className = "small";
-    manualLabel.textContent = "또는 직접 변경할 표현을 입력하세요.";
-    div.appendChild(manualLabel);
-
-    const manual = document.createElement("input");
-    manual.className = "manual";
-    manual.placeholder = "직접 입력";
-    manual.value = "";
-    manual.addEventListener("input", () => {
-      replacementValues[index] = manual.value;
-      select.value = "";
-      updateModified();
-    });
-    div.appendChild(manual);
-
-    area.appendChild(div);
-  });
-}
-
-function updateModified() {
-  const text = document.getElementById("original").value;
-  const tokens = text.match(/\S+|\s+/g) || [];
-  let wordIndex = 0;
-
-  const modified = tokens.map(token => {
-    if (/^\s+$/.test(token)) return token;
-
-    wordIndex++;
-    const targetIndex = wordIndex - 1;
-
-    if (targetIndex % 5 !== 4) return token;
-
-    const replacement = replacementValues[targetIndex];
-    if (!replacement) return token;
-
-    const parts = getWordParts(token);
-    if (!parts) return replacement;
-
-    return parts.prefix + replacement + parts.suffix;
-  }).join("");
-
-  document.getElementById("modifiedPreview").textContent =
-    modified || "수정문이 없습니다.";
-}
-
-function makeSpacing() {
-  const text = document.getElementById("original").value;
-  const mode = document.getElementById("spacingMode").value;
-  const tokens = text.trim().split(/\s+/).filter(Boolean);
-
-  let result = text;
-
-  if (mode === "double") {
-    result = tokens.join("  ");
-  } else if (mode === "line") {
-    result = tokens.join("\n");
-  }
-
-  document.getElementById("spacingPreview").textContent =
-    result || "원문을 입력하세요.";
-}
-
-function copySpacing() {
-  const text = document.getElementById("spacingPreview").textContent;
-  navigator.clipboard.writeText(text)
-    .then(() => alert("띄어쓰기 결과를 복사했습니다."))
-    .catch(() => alert("복사할 수 없습니다. 결과를 직접 선택해 복사하세요."));
-}
-
-function downloadCSV() {
-  const original = document.getElementById("original").value;
-  const modified = document.getElementById("modifiedPreview").textContent;
-  const spacing = document.getElementById("spacingPreview").textContent;
-  const originalScore = document.getElementById("originalScore").value;
-  const modifiedScore = document.getElementById("modifiedScore").value;
-  const memo = document.getElementById("memo").value;
-
-  const rows = [
-    ["항목", "내용"],
-    ["원문", original],
-    ["수정문", modified],
-    ["띄어쓰기 변경문", spacing],
-    ["원문 탐지 결과(%)", originalScore],
-    ["수정문 탐지 결과(%)", modifiedScore],
-    ["실험 메모", memo]
-  ];
-
-  const csv = "\uFEFF" + rows.map(row =>
-    row.map(value => `"${String(value).replace(/"/g, '""')}"`).join(",")
-  ).join("\n");
-
-  const blob = new Blob([csv], {type: "text/csv;charset=utf-8;"});
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = "AI_text_experiment.csv";
-  link.click();
-  URL.revokeObjectURL(url);
-}
-
-document.getElementById("original").addEventListener("input", () => {
-  analyzeText();
+  result.replaceChildren(fragment);
+  statusLine.textContent = changed
+    ? changed + '곳 변경 · 파란 밑줄의 표현이 문맥에 맞는지 확인하세요.'
+    : position < 5 ? '5단어 미만이라 원문을 그대로 표시했습니다.'
+    : '변경 대상에 등록된 유사 표현이 없어 원문을 그대로 표시했습니다.';
 });
 </script>
 </body>
