@@ -1,4 +1,5 @@
 <!doctype html>
+
 <html lang="ko">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -146,6 +147,7 @@ aside small { color:#ac8c92; font-size:11px }
   textarea,#result { min-height:180px }
 }
 @media(prefers-reduced-motion:reduce) { * { scroll-behavior:auto } }
+#mode{display:block;max-width:100%;background:#24181c;color:#fff;border:1px solid #70424a;padding:.7rem;border-radius:.5rem;font:inherit}#modelNote{display:block;margin-top:.4rem}#modelNote[hidden]{display:none}#result mark{cursor:pointer}
 </style>
 <div id="accountGate" class="gate">
 <h1>저지먼트 엑스</h1><p>로그인하고 지난 수정 기록을 이어서 확인하세요.</p>
@@ -160,7 +162,7 @@ aside small { color:#ac8c92; font-size:11px }
 <div id="application" hidden><div class="accountbar"><span id="accountName"></span><button id="signout">로그아웃</button></div>
 <div class="workspace"><aside><button id="newRecord">새 글</button><h2>내 기록</h2><button id="reloadRecords">목록 새로고침</button><div id="history"></div><button id="moreRecords" hidden>더 보기</button></aside><main>
 <h1>저지먼트 엑스</h1>
-<p>글 전체에서 유사 표현을 찾아 바꾸고, 바뀐 부분에 밑줄을 표시합니다.</p>
+<p>원문과 수정문을 비교하세요. 강조된 표현을 누르면 원래 표현으로 돌아갑니다.</p>
 <label for="source">원문</label>
 <textarea id="source" placeholder="실험할 글을 입력하세요."></textarea>
 <details><summary>그대로 둘 이름·용어</summary>
@@ -168,9 +170,39 @@ aside small { color:#ac8c92; font-size:11px }
 <input id="names" placeholder="예: 블리치, 영압, 나의 해방일지">
 <small>일반 단어와 겹치는 이름은 여기에 적어 주세요. 따옴표나 겹낫표 안의 표현도 보존합니다.</small>
 </details>
+<label for="mode">변환 방식</label>
+<select id="mode"><option value="ai">AI 문장 변환 · 이 기기에서 실행</option><option value="basic">빠른 변환 · 사전과 표현 규칙</option></select>
+<small id="modelNote">처음 수정할 때 모델 파일 약 1.8 GB를 받습니다. 저장 공간과 시간이 부족하면 빠른 변환을 선택하세요.</small>
+<button type="button" hidden id="skipModel">AI 중단 · 기본 변환 계속</button>
 <button id="revise" disabled>수정하기</button>
 <div class="savebar"><button id="saveRecord">현재 기록 저장</button><small id="saveStatus" role="status"></small></div><h2>수정된 글</h2><div id="result"></div><small id="status" role="status"></small><small id="dictionaryCredit" hidden>사전 자료 · <a href="https://krdict.korean.go.kr/" target="_blank" rel="noopener">국립국어원 한국어기초사전</a> · <a href="https://creativecommons.org/licenses/by-sa/2.0/kr/" target="_blank" rel="noopener">CC BY-SA 2.0 KR</a></small>
 </main></div></div>
+<script type="text/plain" id="localWorker">
+let generator;
+self.onmessage=async({data})=>{
+  try {
+    if(!generator){
+      const {pipeline,env}=await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/transformers.min.js');
+      env.allowLocalModels=false;
+      env.backends.onnx.wasm.numThreads=1;
+      generator=await pipeline('text-generation','onnx-community/Qwen2.5-1.5B-Instruct',{
+        device:'wasm',dtype:'q4',progress_callback(event){
+          if(event.status==='progress') self.postMessage({progress:Math.floor(event.progress||0),file:event.file});
+        }
+      });
+    }
+    self.postMessage({running:true});
+    const messages=[
+      {role:'system',content:'한국어 문장 편집자입니다. 한 문장을 같은 뜻으로 바꾸세요. 말투, 인명, 수치, 단위, 부정, 시제, 인과관계와 조건을 유지하세요. 정보를 추가하거나 질문에 답하지 마세요. 출력은 수정한 한국어 문장 하나만.'},
+      {role:'user',content:JSON.stringify({앞문맥:data.context,수정대상:data.source,보호표현:data.names})}
+    ];
+    const [answer]=await generator(messages,{do_sample:false,max_new_tokens:Math.min(384,Math.max(80,data.source.length*3)),return_full_text:false});
+    const generated=answer.generated_text;
+    self.postMessage({output:typeof generated==='string'?generated:generated.at(-1)?.content||''});
+  }catch{ self.postMessage({failed:true}); }
+};
+</script>
+
 <script>
 const el = id => document.getElementById(id);
 const rules = new Map();
@@ -312,6 +344,87 @@ pairs(`
 에 대하여|에 대해
 `);
 
+// Match constructions with their complements so that particles and endings stay together.
+pairs(`
+같은 조건의 실험이 아니게 돼|실험 조건이 달라져
+기존 실험 환경에 접근할 수 없어|기존 실험 환경을 이용할 수 없어
+동일 조건으로|같은 조건에서
+동일한 조건에서|같은 조건에서
+동일한 조건으로|같은 조건으로
+대신 측정할 수 없어|대신 측정하는 건 불가능해
+측정한 값을|측정해서 얻은 값을
+빈칸에 합치면|빈칸에 합쳐 넣으면
+수치도 만들어 넣지 않았어|수치를 임의로 채워 넣지도 않았어
+문항을 보내주면|문항을 보내 주면
+원문 그대로 복붙할 수 있게|원문을 그대로 복사해 붙여넣을 수 있도록
+따로 표시하겠어|구분해서 표시할게
+원문이 없는 항목은 따로 표시하겠어|원문이 없는 항목은 별도로 표시할게
+모델과 접근 가능 여부를 확인해서|모델을 확인하고 접근이 가능한지도 살펴본 뒤
+접근 가능 여부를 확인해서|접근할 수 있는지 확인한 뒤
+실제로 수행할 수 있는 방법을|실제로 어떻게 수행할 수 있을지
+방법을 정해야 해|방식을 정해야 해
+실험을 진행하지 않았다|실험을 실시하지 않았다
+실험은 진행하지 않았고|실험은 실시하지 않았고
+측정할 수 없었다|측정이 불가능했다
+측정할 수 없었다는|측정이 불가능했다는
+측정할 수 있었다|측정이 가능했다
+차이가 있는지|차이가 나타나는지
+차이가 없었다|차이가 나타나지 않았다
+차이가 있었다|차이가 나타났다
+영향을 미쳤다|영향을 주었다
+결과를 비교했다|결과를 서로 비교해 보았다
+결과를 정리했다|결과를 정리해 두었다
+조건을 일정하게 유지했다|같은 조건을 유지했다
+조건이 달라지면|조건이 달라질 경우
+그 이유를 알아보기 위해|그 까닭을 살펴보기 위해
+알아볼 수 있다|살펴볼 수 있다
+예상과 달리|예상한 것과 다르게
+반복해서 측정했다|측정을 반복했다
+시간이 오래 걸렸다|많은 시간이 필요했다
+자세히 살펴보면|좀 더 자세히 들여다보면
+이와 같은 이유로|이런 까닭에
+현재로서는|지금으로서는
+가능한지 확인했다|가능 여부를 확인했다
+여부를 살펴보았다|여부를 검토했다
+예측하기 어렵다|쉽게 예측할 수 없다
+근거로 삼았다|판단의 근거로 사용했다
+관찰한 내용을|관찰해서 알게 된 내용을
+결과에 따르면|결과를 보면
+이런 경우에는|이럴 때는
+주된 이유는|주된 까닭은
+기록으로 남겼다|기록해 두었다
+시간이 지날수록|시간이 흐를수록
+차이가 크지 않았다|큰 차이는 없었다
+두 가지 차이가 있어|두 가지 점에서 달라
+주변 맨틀보다|주위의 맨틀보다
+긴 시간 동안|오랜 시간에 걸쳐
+실험이 끝난 뒤|실험을 마친 뒤
+`);
+// Preserve tense, negation and politeness while varying the verbal construction.
+for (const [verb,noun] of [['측정','측정'],['비교','비교'],['분석','분석'],['관찰','관찰'],['확인','확인'],['실험','실험']]) {
+  for (const [ending,rest] of [
+    ['할 수 없어서','불가능해서'],['할 수 없어','불가능해'],['할 수 없다','불가능하다'],
+    ['할 수 없습니다','불가능합니다'],['할 수 없었습니다','불가능했습니다'],
+    ['할 수 없었다','불가능했다'],['하기 전에는','전에'],['한 후에','뒤에']
+  ]) {
+    if(ending==='하기 전에는') rules.set(verb+ending,verb+'하기에 앞서서는');
+    else if(ending==='한 후에') rules.set(verb+ending,verb+'한 뒤에');
+    else rules.set(verb+ending,verb+'하는 것이 '+rest);
+  }
+}
+// Avoid one-word changes that can alter necessity, certainty, or register.
+for(const phrase of ['이해하시면 됩니다','할 필요가 있다','할 필요가 있습니다','것입니다','것이다','왜냐하면','그중에서도']) rules.delete(phrase);
+
+// Apply productive endings only when the entire Korean word has the expected form.
+function constructionRules(text) {
+  const additions=new Map();
+  for(const match of text.matchAll(/(?<![\p{L}\p{N}_])([가-힣]{1,12})(했기 때문에|하기 때문에|했음에도 불구하고|했을 경우|할 경우에는|하는 동안에|한 다음에)(?![\p{L}\p{N}_])/gu)){
+    const endings={'했기 때문에':'했으므로','하기 때문에':'하므로','했음에도 불구하고':'했는데도','했을 경우':'했다면','할 경우에는':'한다면','하는 동안에':'하는 동안','한 다음에':'한 뒤에'};
+    additions.set(match[0],match[1]+endings[match[2]]);
+  }
+  return additions;
+}
+
 function compileRules(localRules) {
   const keys=[...localRules.keys()].sort((a,b)=>b.length-a.length);
   const pattern=keys.map(s=>s.split(' ').map(escapeRE).join('[ \\t]+')).join('|');
@@ -336,7 +449,7 @@ function protectedText(text,names) {
 }
 
 function rewrite(text,names,additions=[]) {
-  const localRules=new Map([...additions,...rules]);
+  const localRules=new Map([...additions,...rules,...constructionRules(text)]);
   const matcher=compileRules(localRules);
   const mask=protectedText(text,names), pieces=[];
   let cursor=0;
@@ -353,8 +466,142 @@ function rewrite(text,names,additions=[]) {
   return pieces;
 }
 
+let modelWorker=null;
+let stopModel=null;
+function releaseModel() {
+  modelWorker?.terminate();
+  modelWorker=null;
+}
+async function modelSentence(source,context,names) {
+  if(!modelWorker){
+    const url=URL.createObjectURL(new Blob([el('localWorker').textContent],{type:'text/javascript'}));
+    try {modelWorker=new Worker(url,{type:'module'});} finally {URL.revokeObjectURL(url);}
+  }
+  return new Promise((resolve,reject)=>{
+    let timer;
+    const abort=()=>{ clearTimeout(timer);releaseModel();stopModel=null;reject(Error('기본 변환으로 전환했습니다.')); };
+    const refresh=()=>{clearTimeout(timer);timer=setTimeout(abort,120000);};
+    stopModel=abort;
+    refresh();
+    modelWorker.onerror=abort;
+    modelWorker.onmessage=({data})=>{
+      refresh();
+      if(data.failed){abort();return;}
+      if(data.running){el('status').textContent='기기에서 문장을 다듬고 있습니다…';return;}
+      if(data.progress!==undefined){
+        el('status').textContent='AI 파일 받는 중 · '+data.file+' '+data.progress+'%';return;
+      }
+      clearTimeout(timer);stopModel=null;resolve(String(data.output||'').trim());
+    };
+    modelWorker.postMessage({source,context,names});
+  });
+}
+function anchors(sentence) {
+  return sentence.match(/[A-Za-z][A-Za-z0-9_.+-]*|[+-]?\d+(?:[.,:/-]\d+)*(?:\s?(?:퍼센트|개월|시간|초|분|회|번|개|명|년|월|일|%|℃|㎏|kg|ms|GB|MB))?/gu)||[];
+}
+function acceptable(source,result,names) {
+  if(!result || result===source || !/[가-힣]/u.test(result) || result.length<source.length*.56 || result.length>source.length*1.65+8 || /[\r\n<>]|^(수정|답변|결과)\s*[:：]/u.test(result))return false;
+  if(sentencePieces(result).filter(x=>x.trim()).length!==1)return false;
+  if(JSON.stringify(anchors(source))!==JSON.stringify(anchors(result)))return false;
+  const mask=protectedText(source,names);
+  for(let i=0;i<mask.length;i++){
+    if(!mask[i])continue;
+    let end=i+1;
+    while(mask[end])end++;
+    const term=source.slice(i,end);
+    if(source.split(term).length!==result.split(term).length)return false;
+    i=end-1;
+  }
+  for(const pattern of [/않|못|없|불가능|(?:^|\s)안\s/gu,/아직/gu,/이상/gu,/이하/gu,/미만/gu,/초과/gu,/반드시|아마|가능성/gu]){
+    if((source.match(pattern)||[]).length!==(result.match(pattern)||[]).length)return false;
+  }
+  // Preserve order of scientific comparisons, directions and written quantities.
+  const facts=/증가|감소|상승|하강|이상|이하|미만|초과|왼쪽|오른쪽|최대|최소|적어도|최소한|반드시|아마|가능성|(?:한|두|세|네|다섯|여섯|일곱|여덟|아홉|열)\s*(?:번|개|명|차례)/gu;
+  if(JSON.stringify(source.match(facts))!==JSON.stringify(result.match(facts)))return false;
+  return true;
+}
+function sentencePieces(text){
+  const parts=[];
+  for(const line of text.split(/(\r\n|\r|\n)/u)){
+    if(!line.trim()){parts.push(line);continue;}
+    if(typeof Intl.Segmenter==='function'){
+      for(const item of new Intl.Segmenter('ko',{granularity:'sentence'}).segment(line))parts.push(item.segment);
+    }else parts.push(...(line.match(/[^.!?]+(?:[.!?]+(?=\s|$))?|[.!?]+/gu)||[line]));
+  }
+  return parts;
+}
+// Every changed run carries its exact original text for restore and saved records.
+function changedWords(source, revised) {
+  const tokenize=s=>s.match(/\s+\S+|\S+|\s+/gu)||[];
+  const a=tokenize(source), b=tokenize(revised);
+  const table=Array.from({length:a.length+1},()=>new Uint16Array(b.length+1));
+  for(let i=a.length-1;i>=0;i--)for(let j=b.length-1;j>=0;j--){
+    table[i][j]=a[i]===b[j]?1+table[i+1][j+1]:Math.max(table[i+1][j],table[i][j+1]);
+  }
+  let i=0,j=0,old='',next='';
+  const runs=[];
+  function flush(){if(old||next)runs.push({from:old,to:next});old='';next='';}
+  while(i<a.length||j<b.length){
+    if(i<a.length&&j<b.length&&a[i]===b[j]){
+      flush();runs.push({from:a[i++],to:b[j++]});
+    }else if(i<a.length&&(j===b.length||table[i+1][j]>=table[i][j+1]))old+=a[i++];
+    else next+=b[j++];
+  }
+  flush();
+  for(let k=0;k<runs.length;k++){
+    if(runs[k].from && runs[k].to)continue;
+    const start=k?k-1:0;
+    const [left,right]=runs.slice(start,start+2);
+    if(!right)break;
+    runs.splice(start,2,{from:left.from+right.from,to:left.to+right.to});k=start-1;
+  }
+  return runs.map(({from,to})=>from===to?{text:to}:{text:to,original:from});
+}
+
+async function modelRewrite(source,names,job) {
+  let count=0, fallback=0, available=true, context='';
+  const parts=[];
+  const fullMask=protectedText(source,names);
+  let offset=0;
+  for(const segment of sentencePieces(source)){
+    const startOffset=offset;offset+=segment.length;
+    if((fullMask[startOffset] && fullMask[startOffset-1]) || (fullMask[offset-1] && fullMask[offset])){parts.push({text:segment});continue;}
+    const sentence=segment.trim();
+    if(!sentence){parts.push({text:segment});continue;}
+    if(job!==revision) return null;
+    let result='';
+    if(available && sentence.length<=400 && /[가-힣]/u.test(sentence)){
+      try {result=await modelSentence(sentence,context,names);}
+      catch {available=false;}
+    }
+    if(acceptable(sentence,result,names)){
+      const start=segment.indexOf(sentence);
+      parts.push({text:segment.slice(0,start)},...changedWords(sentence,result),{text:segment.slice(start+sentence.length)});
+      count++;
+    }else{parts.push(...rewrite(segment,names));fallback++;}
+    context=sentence.slice(-180);
+  }
+  return {parts,message:'AI 적용 '+count+'문장 · 기본 규칙 적용 '+fallback+'문장'+(available?'':' · AI 실행 중단')};
+}
+
+let revision=0;
+el('skipModel').onclick=()=>stopModel?.();
+el('mode').onchange=()=>{el('modelNote').hidden=el('mode').value!=='ai';};
+function restorePiece(event){
+  const mark=event.target.closest('mark');
+  if(!mark || !mark.title.startsWith('원래 표현: '))return;
+  mark.replaceWith(document.createTextNode(mark.title.slice('원래 표현: '.length)));
+  hasChanges=true;
+  el('status').textContent='원래 표현을 복원했습니다.';
+  el('saveStatus').textContent='복원을 기록하려면 현재 기록 저장을 누르세요.';
+}
+el('result').addEventListener('click',restorePiece);
+el('result').addEventListener('keydown',event=>{
+  if(event.key==='Enter'||event.key===' '){event.preventDefault();restorePiece(event);}
+});
 let hasChanges=false;
 function clearResult() {
+  revision++; stopModel?.();
   hasChanges=true;
   el('revise').disabled=!el('source').value.trim();
   el('result').replaceChildren();
@@ -369,33 +616,43 @@ el('revise').onclick=async()=>{
   el('source').readOnly=el('names').readOnly=true;
   el('revise').disabled=true;
   const sourceSnapshot=el('source').value, namesSnapshot=el('names').value;
-  const additions=[];
-  let dictionaryMessage='사전 연결 전 · 기본 표현 규칙 적용';
-  if(window.dictionaryLookup) {
-    el('revise').disabled=true;
-    el('status').textContent='사전에서 유사 표현을 찾고 있습니다…';
-    try {
-      const result=await window.dictionaryLookup(sourceSnapshot,namesSnapshot);
-      additions.push(...result.additions);
+  const job=revision;
+  let parts, dictionaryMessage;
+  el('mode').disabled=true;
+  el('dictionaryCredit').hidden=true;
+  try {
+    if(el('mode').value==='ai'){
+      el('status').textContent='AI 모델을 준비하고 있습니다…';
+      el('skipModel').hidden=false;
+      const revised=await modelRewrite(sourceSnapshot,namesSnapshot,job);
+      if(!revised)return;
+      parts=revised.parts;dictionaryMessage=revised.message;
+    }else{
+      el('status').textContent='사전에서 유사 표현을 찾고 있습니다…';
+      const result=window.dictionaryLookup?await window.dictionaryLookup(sourceSnapshot,namesSnapshot):{additions:[],message:'기본 표현 규칙 적용'};
+      parts=rewrite(sourceSnapshot,namesSnapshot,result.additions);
       dictionaryMessage=result.message;
-    } catch {
-      dictionaryMessage='사전 조회 실패 · 기본 표현 규칙 적용';
     }
+  } catch {
+    parts=rewrite(sourceSnapshot,namesSnapshot);
+    dictionaryMessage='외부 기능 연결 지연 · 기본 표현 규칙 적용';
+  } finally {
+    window.transforming=false;
+    el('skipModel').hidden=true;
+    el('mode').disabled=false;
+    el('source').readOnly=el('names').readOnly=false;
+    el('revise').disabled=!el('source').value.trim();
   }
-  window.transforming=false;
-  el('source').readOnly=el('names').readOnly=false;
-  el('revise').disabled=false;
-  if(sourceSnapshot!==el('source').value || namesSnapshot!==el('names').value)return;
-
+  if(job!==revision || sourceSnapshot!==el('source').value || namesSnapshot!==el('names').value)return;
   hasChanges=true;
   const fragment=document.createDocumentFragment();
   let count=0;
-  for (const part of rewrite(sourceSnapshot,namesSnapshot,additions)) {
+  for (const part of parts) {
     if (!part.original) {
       fragment.append(part.text);
       continue;
     }
-    const mark=document.createElement('mark');
+    const mark=document.createElement('mark');mark.tabIndex=0;mark.setAttribute('role','button');
     mark.textContent=part.text;
     mark.title='원래 표현: '+part.original;
     fragment.append(mark);
@@ -408,7 +665,6 @@ el('revise').onclick=async()=>{
   window.dispatchEvent(new Event('rewrite-complete'));
 };
 </script>
-
 
 <script type="module">
 // Supabase 프로젝트의 공개 연결 정보만 입력하세요.
@@ -456,6 +712,34 @@ get('checkId').onclick=()=>action('authStatus',async()=>{
   notice('authStatus',data?'사용 가능한 아이디입니다.':'이미 사용 중인 아이디입니다.');
 });
 
+const dictionaryCache=new Map();
+const dictionaryErrors={
+  login_required:'로그인이 만료됐습니다. 로그아웃 후 다시 로그인하세요.',
+  dictionary_not_configured:'사전 인증키가 설정되지 않았습니다.',
+  dictionary_key_invalid:'사전 인증키가 올바르지 않습니다.',
+  dictionary_key_suspended:'사전 인증키가 일시 중지됐습니다. 사전 제공기관에서 확인하세요.',
+  dictionary_provider_limit:'사전 제공기관의 조회 한도에 도달했습니다.',
+  free_usage_limit:'이전 조회량 제한이 남아 있습니다. 서버의 제한 해제 설정을 적용해야 합니다.',
+  dictionary_usage_setup_failed:'조회 기록 설정에 오류가 있습니다. 서버 설정을 확인해야 합니다.',
+  dictionary_timeout:'사전 서버 응답이 늦어 일부 조회를 마치지 못했습니다. 다시 눌러주세요.',
+  dictionary_unavailable:'사전 서버가 일시적으로 응답하지 않습니다.',
+  dictionary_response_invalid:'사전 서버에서 예상과 다른 응답을 보냈습니다.',
+  dictionary_response_error:'사전 제공기관에서 요청을 거절했습니다.',
+  dictionary_lookup_failed:'사전 연결 중 오류가 발생했습니다. 다시 시도하세요.',
+};
+async function dictionaryFailure(error) {
+  let payload;
+  try { payload=await error.context?.clone().json() } catch {}
+  const status=error.context?.status;
+  const code=payload?.error;
+  if(dictionaryErrors[code])return dictionaryErrors[code];
+  if(status===401)return dictionaryErrors.login_required;
+  if(status===429)return '조회 요청이 제한됐습니다. 잠시 후 다시 시도하세요.';
+  if(error.name==='FunctionsFetchError' || error.name==='FunctionsRelayError') {
+    return '사전 서버에 연결되지 않습니다. 인터넷 연결과 학교 네트워크의 접근 제한을 확인하세요.';
+  }
+  return dictionaryErrors.dictionary_lookup_failed;
+}
 window.dictionaryLookup=async(text,names)=>{
   if(!db || !user)throw Error('로그인이 필요합니다.');
   const mask=protectedText(text,names),candidates=[];
@@ -464,19 +748,46 @@ window.dictionaryLookup=async(text,names)=>{
     candidates.push(m[0]);
   }
   const unique=[...new Set(candidates)];
-  const selected=unique.slice(0,24),additions=[];
-  let count=0;
-  for(let start=0;start<selected.length;start+=8) {
-    const {data,error}=await db.functions.invoke('dictionary-lookup',{body:{words:selected.slice(start,start+8)}});
-    if(error)throw error;
-    for(const item of data.items) {
-      if(item.replacement && item.word!==item.replacement) {
-        additions.push([item.word,item.replacement]);count++;
-      }
-    }
+  const selected=unique.length<=24?unique:Array.from({length:24},(_,i)=>unique[Math.round(i*(unique.length-1)/23)]),additions=[],pending=[],notes=new Set();
+  let completed=0,cacheHits=0;
+  function accept(item) {
+    completed++;
+    if(item.replacement && item.word!==item.replacement)additions.push([item.word,item.replacement]);
   }
-  get('dictionaryCredit').hidden=false;
-  return {additions,message:'사전 후보 '+count+'개 확인'+(unique.length>24?' · 처음 24개 어절 조회':'')};
+  for(const word of selected) {
+    const key=user.id+':'+word,entry=dictionaryCache.get(key);
+    if(entry && entry.expires>Date.now()){accept(entry.item);cacheHits++}
+    else pending.push(word);
+  }
+  for(let start=0;start<pending.length;start+=8) {
+    const batch=pending.slice(start,start+8);
+    let data,error;
+    try {
+      ({data,error}=await db.functions.invoke('dictionary-lookup',{body:{words:batch}}));
+    } catch (failure) {
+      notes.add(await dictionaryFailure(failure));
+      break;
+    }
+    if(error){notes.add(await dictionaryFailure(error));break}
+    if(!data || !Array.isArray(data.items)) {
+      notes.add(dictionaryErrors.dictionary_response_invalid);
+      break;
+    }
+    for(const item of data.items) {
+      if(!batch.includes(item.word))continue;
+      if(dictionaryCache.size>=2000)dictionaryCache.clear();
+      dictionaryCache.set(user.id+':'+item.word,{item,expires:Date.now()+3600000});
+      accept(item);
+    }
+    for(const code of data.warnings||[])notes.add(dictionaryErrors[code]||dictionaryErrors.dictionary_lookup_failed);
+    get('status').textContent='사전 조회 '+completed+'/'+selected.length+'개 완료…';
+  }
+  get('dictionaryCredit').hidden=completed===0;
+  const messageParts=['사전 조회 '+completed+'/'+selected.length+'개 · 후보 '+additions.length+'개'];
+  if(cacheHits)messageParts.push('이전 조회 재사용 '+cacheHits+'개');
+  if(unique.length>24)messageParts.push('글 전체에 분포한 24개 어절 조회');
+  if(notes.size)messageParts.push(...notes);
+  return {additions,message:messageParts.join(' · ')};
 };
 
 get('accountForm').onsubmit=e=>{
@@ -542,7 +853,7 @@ async function loadHistory(first) {
       const fragment=document.createDocumentFragment();
       for(const part of data.parts) {
         if(part.original) {
-          const mark=document.createElement('mark');
+          const mark=document.createElement('mark');mark.tabIndex=0;mark.setAttribute('role','button');
           mark.textContent=part.text;mark.title='원래 표현: '+part.original;fragment.append(mark);
         } else fragment.append(part.text);
       }
@@ -599,4 +910,5 @@ if(!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) {
 }
 
 </script>
+
 </html>
