@@ -148,8 +148,13 @@ aside small { color:#ac8c92; font-size:11px }
 }
 @media(prefers-reduced-motion:reduce) { * { scroll-behavior:auto } }
 #mode{display:block;max-width:100%;background:#24181c;color:#fff;border:1px solid #70424a;padding:.7rem;border-radius:.5rem;font:inherit}#modelNote{display:block;margin-top:.4rem}#modelNote[hidden]{display:none}#result mark{cursor:pointer}
-select {max-width:100%;padding:12px;background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:6px;font:inherit}
-.checkrow{display:flex;gap:10px;align-items:center}.checkrow input{width:auto;min-width:20px;min-height:20px}
+.protected-field {margin:20px 0}
+.period-controls {margin:20px 0 10px;padding:0;border:0;min-width:0}
+.period-controls legend {font-size:15px;font-weight:750;margin-bottom:8px}
+.period-buttons {display:flex;gap:10px;flex-wrap:wrap}
+.period-buttons button {flex:1;min-width:135px;min-height:48px;margin:0 0 8px;background:var(--surface);border:1px solid var(--line);color:var(--muted)}
+.period-buttons button[aria-pressed="true"] {background:#a32334;border:2px solid #ff8b7e;color:#fff;font-weight:800;box-shadow:0 0 0 2px #f3454320}
+.period-buttons button[aria-pressed="true"]::before {content:"✓ ";font-weight:900}
 aside .delete-record{display:inline-block;width:auto;font-size:12px;color:#ff9c90;margin-top:8px;padding:4px 10px;border:1px solid var(--line)}
 #historySearch{padding:10px;font-size:14px}
 </style>
@@ -169,18 +174,18 @@ aside .delete-record{display:inline-block;width:auto;font-size:12px;color:#ff9c9
 <p>원문과 수정문을 비교하세요. 강조된 표현을 누르면 원래 표현으로 돌아갑니다.</p>
 <label for="source">원문</label>
 <textarea id="source" maxlength="100000" placeholder="실험할 글을 입력하세요."></textarea>
-<details><summary>그대로 둘 이름·용어</summary>
-<label for="names">쉼표로 구분해 입력하세요</label>
+<div class="protected-field"><label for="names">그대로 둘 이름·용어</label>
 <input id="names" placeholder="예: 블리치, 영압, 나의 해방일지">
-<small>일반 단어와 겹치는 이름은 여기에 적어 주세요. 따옴표나 겹낫표 안의 표현도 보존합니다.</small>
-</details>
+<small>쉼표로 구분해 입력하세요. 따옴표나 겹낫표 안의 표현도 보존합니다.</small></div>
 <input type="hidden" id="mode" value="ai">
-<small id="modelNote">AI가 두 어절당 한 곳 변경을 목표로 수정합니다. 의미와 보호 표현을 우선합니다. 입력문은 AI 제공기관으로 전송됩니다.</small>
-<details><summary>문장 설정</summary><label for="tone">전체 글의 말투</label><select id="tone"><option value="auto">원문의 주된 말투로 통일</option><option value="formal">존댓말 · 합니다체</option><option value="polite">존댓말 · 해요체</option><option value="casual">반말 · 해체</option><option value="written">서술체 · 한다체</option></select><label class="checkrow"><input id="removePeriods" type="checkbox">문장 끝 마침표 제거</label><small>숫자의 소수점과 주소 속 점은 보존합니다. 쉼표는 의미 구분에 필요한 경우 유지합니다.</small></details><button id="revise" disabled>수정하기</button>
+<small id="modelNote">원문의 주된 말투로 통일하고 두 어절당 한 곳 변경을 목표로 수정합니다. 의미와 보호 표현을 우선하며 입력문은 AI 제공기관으로 전송됩니다.</small>
+<fieldset class="period-controls"><legend>문장 끝 마침표</legend>
+<div class="period-buttons"><button type="button" id="keepPeriods" aria-pressed="true">마침표 유지</button><button type="button" id="deletePeriods" aria-pressed="false">마침표 삭제</button></div>
+<input id="removePeriods" type="checkbox" hidden>
+<small>소수점과 주소 속 점은 보존합니다.</small></fieldset><button id="revise" disabled>수정하기</button>
 <div class="savebar" id="savebar"><button id="saveRecord">현재 기록 저장</button><small id="saveStatus" role="status"></small></div><h2>수정된 글</h2><div id="result"></div><small id="status" role="status"></small>
 <div id="reviewTools" hidden><button type="button" id="copyText">수정문 복사</button>
-<details id="editPanel"><summary>수정문 직접 다듬기</summary><label for="draft">수정문</label>
-<textarea id="draft" maxlength="100000"></textarea><button type="button" id="applyDraft">수정 반영</button></details></div><small id="dictionaryCredit" hidden>사전 자료 · <a href="https://krdict.korean.go.kr/" target="_blank" rel="noopener">국립국어원 한국어기초사전</a> · <a href="https://creativecommons.org/licenses/by-sa/2.0/kr/" target="_blank" rel="noopener">CC BY-SA 2.0 KR</a></small>
+</div><small id="dictionaryCredit" hidden>사전 자료 · <a href="https://krdict.korean.go.kr/" target="_blank" rel="noopener">국립국어원 한국어기초사전</a> · <a href="https://creativecommons.org/licenses/by-sa/2.0/kr/" target="_blank" rel="noopener">CC BY-SA 2.0 KR</a></small>
 </main></div></div>
 <script>
 const el = id => document.getElementById(id);
@@ -381,31 +386,35 @@ function renderParts(parts) {
   }
   el('result').replaceChildren(fragment);
   el('reviewTools').hidden=false;
-  el('editPanel').open=false;
   return count;
 }
-el('editPanel').addEventListener('toggle',()=>{
-  if(el('editPanel').open)el('draft').value=el('result').textContent;
-});
-el('applyDraft').onclick=()=>{
-  const draft=el('draft').value;
-  const source=el('source').value;
-  if(!draft.trim() || !keptNames(source,draft,el('names').value)){
-    el('status').textContent='내용과 보호할 이름·인용문을 확인하세요.';
-    return;
-  }
-  const count=renderParts(changedWords(source,draft));
-  hasChanges=true;
-  el('status').textContent=count+'곳 변경 · 직접 검토하고 수정했습니다.';
-  el('saveStatus').textContent=guestMode?'':'계정에 반영하려면 현재 기록 저장을 누르세요.';
-};
 el('copyText').onclick=async()=>{
   try {await navigator.clipboard.writeText(el('result').textContent);el('copyText').textContent='복사 완료';}
-  catch {el('editPanel').open=true;el('draft').value=el('result').textContent;el('draft').select();
-    el('status').textContent='선택된 글에서 복사를 눌러주세요.';}
+  catch {
+    const selection=window.getSelection();
+    const range=document.createRange();
+    range.selectNodeContents(el('result'));
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    el('status').textContent='수정문을 선택했습니다. 길게 누르거나 Ctrl+C로 복사하세요.';
+  }
 };
 let revision=0;
 const guestMode=false;
+function updatePeriodButtons() {
+  const remove=el('removePeriods').checked;
+  el('keepPeriods').setAttribute('aria-pressed',String(!remove));
+  el('deletePeriods').setAttribute('aria-pressed',String(remove));
+}
+for(const [id,remove] of [['keepPeriods',false],['deletePeriods',true]]){
+  el(id).onclick=()=>{
+    if(window.transforming || el('removePeriods').checked===remove)return;
+    el('removePeriods').checked=remove;
+    updatePeriodButtons();
+    clearResult();
+  };
+}
+updatePeriodButtons();
 function updateModeUI() {el('revise').textContent='AI로 수정하기';}
 el('mode').value='ai';
 updateModeUI();
@@ -435,13 +444,13 @@ function clearResult() {
   el('status').textContent='';
 }
 
-for (const id of ['source','names','tone','removePeriods']) el(id).addEventListener('input',clearResult);
+for (const id of ['source','names']) el(id).addEventListener('input',clearResult);
 
 el('revise').onclick=async()=>{
   if(window.transforming)return;
   window.transforming=true;
   el('source').readOnly=el('names').readOnly=true;
-  el('tone').disabled=el('removePeriods').disabled=true;
+  el('keepPeriods').disabled=el('deletePeriods').disabled=true;
   el('revise').disabled=true;
   const sourceSnapshot=el('source').value, namesSnapshot=el('names').value;
   const job=revision;
@@ -455,7 +464,7 @@ el('revise').onclick=async()=>{
   el('saveStatus').textContent='';
   try {
     el('status').textContent='AI 서버에 연결하고 있습니다…';
-    const revised=await cloudRewrite(sourceSnapshot,namesSnapshot,job,resolveTone(sourceSnapshot,el('tone').value));
+    const revised=await cloudRewrite(sourceSnapshot,namesSnapshot,job,resolveTone(sourceSnapshot,'auto'));
     if(!revised)return;
     parts=revised.parts;dictionaryMessage=revised.message;complete=revised.complete;
     if(el('removePeriods').checked){
@@ -473,7 +482,7 @@ el('revise').onclick=async()=>{
     window.transforming=false;
     el('mode').disabled=false;
     el('source').readOnly=el('names').readOnly=false;
-    el('tone').disabled=el('removePeriods').disabled=false;
+    el('keepPeriods').disabled=el('deletePeriods').disabled=false;
     el('revise').disabled=!el('source').value.trim();
   }
   if(job!==revision || sourceSnapshot!==el('source').value || namesSnapshot!==el('names').value)return;
@@ -586,7 +595,7 @@ get('accountForm').onsubmit=e=>{
 function discard() { return !hasChanges || confirm('저장하지 않은 변경을 지우고 이동할까요?') }
 function reset() {
   current=null;
-  get('tone').value='auto';get('removePeriods').checked=false;
+  get('removePeriods').checked=false;updatePeriodButtons();
   get('source').value=get('names').value='';
   clearResult();
   hasChanges=false;
@@ -647,8 +656,7 @@ async function loadHistory(first) {
       renderParts(data.parts.filter(part=>!part.method));
       get('reviewTools').hidden=!get('result').textContent;
       experimentMethod=meta?.method||'';
-      get('tone').value=meta?.tone||'auto';
-      get('removePeriods').checked=meta?.removePeriods===true;
+      get('removePeriods').checked=meta?.removePeriods===true;updatePeriodButtons();
       get('mode').value='ai';
       updateModeUI();
       notice('status',meta?.summary || '이전 기록 · 변환 방식 미기록');
@@ -679,12 +687,12 @@ async function loadHistory(first) {
 get('saveRecord').onclick=()=>action('saveStatus',async()=>{
   const source=get('source').value;
   const resultSnapshot=get('result').textContent;
-  const settingsSnapshot=get('tone').value+':'+get('removePeriods').checked;
+  const settingsSnapshot=get('removePeriods').checked;
   if(!source.trim())throw Error('원문을 입력하세요.');
   if(source.length>100000)throw Error('한 기록은 10만 자까지 저장할 수 있습니다.');
   const parts=[...get('result').childNodes].map(node=>node.nodeType===3?{text:node.textContent}:
     {text:node.textContent,original:node.title.replace(/^원래 표현: /,'')});
-  if(experimentMethod)parts.unshift({text:'',method:experimentMethod,summary:get('status').textContent,tone:get('tone').value,removePeriods:get('removePeriods').checked});
+  if(experimentMethod)parts.unshift({text:'',method:experimentMethod,summary:get('status').textContent,tone:'auto',removePeriods:get('removePeriods').checked});
   const record={
     owner:user.id,title:source.trim().slice(0,50),source,
     protected_names:get('names').value,parts,
@@ -694,7 +702,7 @@ get('saveRecord').onclick=()=>action('saveStatus',async()=>{
     db.from('lab_history').insert(record);
   const {data,error}=await query.select().single();
   if(error)throw Error('저장에 실패했습니다. 연결을 확인하세요. 다른 기기에서 수정했다면 새 글로 저장해 주세요.');
-  current=data;hasChanges=get('source').value!==source || get('names').value!==record.protected_names || get('result').textContent!==resultSnapshot || settingsSnapshot!==get('tone').value+':'+get('removePeriods').checked;
+  current=data;hasChanges=get('source').value!==source || get('names').value!==record.protected_names || get('result').textContent!==resultSnapshot || settingsSnapshot!==get('removePeriods').checked;
   notice('saveStatus',hasChanges?'이전 내용이 저장됐습니다. 새 수정 사항을 저장하세요.':'계정에 저장했습니다.');
   await loadHistory(true);
 });
