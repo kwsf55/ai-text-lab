@@ -148,6 +148,10 @@ aside small { color:#ac8c92; font-size:11px }
 }
 @media(prefers-reduced-motion:reduce) { * { scroll-behavior:auto } }
 #mode{display:block;max-width:100%;background:#24181c;color:#fff;border:1px solid #70424a;padding:.7rem;border-radius:.5rem;font:inherit}#modelNote{display:block;margin-top:.4rem}#modelNote[hidden]{display:none}#result mark{cursor:pointer}
+select {max-width:100%;padding:12px;background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:6px;font:inherit}
+.checkrow{display:flex;gap:10px;align-items:center}.checkrow input{width:auto;min-width:20px;min-height:20px}
+aside .delete-record{display:inline-block;width:auto;font-size:12px;color:#ff9c90;margin-top:8px;padding:4px 10px;border:1px solid var(--line)}
+#historySearch{padding:10px;font-size:14px}
 </style>
 <div id="accountGate" class="gate">
 <h1>저지먼트 엑스</h1><p>로그인하고 지난 수정 기록을 이어서 확인하세요.</p>
@@ -160,7 +164,7 @@ aside small { color:#ac8c92; font-size:11px }
 </form><p id="authStatus" role="status"></p>
 </div>
 <div id="application" hidden><div class="accountbar"><span id="accountName"></span><button id="signout">로그아웃</button></div>
-<div class="workspace"><aside id="records"><button id="newRecord">새 글</button><h2>내 기록</h2><button id="reloadRecords">목록 새로고침</button><div id="history"></div><button id="moreRecords" hidden>더 보기</button></aside><main>
+<div class="workspace"><aside id="records"><button id="newRecord">새 글</button><h2>내 기록</h2><form id="historySearchForm"><label for="historySearch">기록 내용 검색</label><input id="historySearch" type="search" maxlength="100" placeholder="원문·수정문 속 단어"><button type="submit">검색</button></form><small id="historyStatus" role="status"></small><button id="reloadRecords">목록 새로고침</button><div id="history"></div><button id="moreRecords" hidden>더 보기</button></aside><main>
 <h1>저지먼트 엑스</h1>
 <p>원문과 수정문을 비교하세요. 강조된 표현을 누르면 원래 표현으로 돌아갑니다.</p>
 <label for="source">원문</label>
@@ -172,7 +176,7 @@ aside small { color:#ac8c92; font-size:11px }
 </details>
 <input type="hidden" id="mode" value="ai">
 <small id="modelNote">AI가 두 어절당 한 곳 변경을 목표로 수정합니다. 의미와 보호 표현을 우선합니다. 입력문은 AI 제공기관으로 전송됩니다.</small>
-<button id="revise" disabled>수정하기</button>
+<details><summary>문장 설정</summary><label for="tone">전체 글의 말투</label><select id="tone"><option value="auto">원문의 주된 말투로 통일</option><option value="formal">존댓말 · 합니다체</option><option value="polite">존댓말 · 해요체</option><option value="casual">반말 · 해체</option><option value="written">서술체 · 한다체</option></select><label class="checkrow"><input id="removePeriods" type="checkbox">문장 끝 마침표 제거</label><small>숫자의 소수점과 주소 속 점은 보존합니다. 쉼표는 의미 구분에 필요한 경우 유지합니다.</small></details><button id="revise" disabled>수정하기</button>
 <div class="savebar" id="savebar"><button id="saveRecord">현재 기록 저장</button><small id="saveStatus" role="status"></small></div><h2>수정된 글</h2><div id="result"></div><small id="status" role="status"></small>
 <div id="reviewTools" hidden><button type="button" id="copyText">수정문 복사</button>
 <details id="editPanel"><summary>수정문 직접 다듬기</summary><label for="draft">수정문</label>
@@ -277,12 +281,41 @@ function cloudChunks(text) {
   }
   return chunks;
 }
-async function cloudRewrite(source,names,job) {
+function resolveTone(text,choice) {
+  if(choice!=='auto')return choice;
+  const counts={formal:0,polite:0,casual:0,written:0};
+  const ends=text.match(/[^.!?。！？\n]+/gu)||[];
+  for(const sentence of ends){
+    const ending=sentence.trim().replace(/[”’"'」』)]+$/u,'');
+    if(/(?:습니다|입니다|합니다|됩니다|습니까|입니까)$/u.test(ending))counts.formal++;
+    else if(/요$/u.test(ending))counts.polite++;
+    else if(/다$/u.test(ending))counts.written++;
+    else if(/(?:해|야|어|아|지|네|게|까|나)$/u.test(ending))counts.casual++;
+  }
+  return Object.keys(counts).reduce((best,key)=>counts[key]>counts[best]?key:best,'written');
+}
+function stripSentencePeriods(text,names='') {
+  // Keep decimals, technical names, ellipses and web/email punctuation.
+  const protectedMask=new Uint8Array(text.length);
+  for(const m of text.matchAll(/https?:\/\/[^\s]+|www\.[^\s]+|[\w.+-]+@[\w.-]+\.[A-Za-z]+|\.{2,}|…+/gu)){
+    let end=m.index+m[0].length;
+    if(/^(?:https?:|www\.)/u.test(m[0]))while(end>m.index && /[.。]/u.test(text[end-1]))end--;
+    protectedMask.fill(1,m.index,end);
+  }
+  for(const name of names.split(/[,\n]/).map(s=>s.trim()).filter(Boolean)){
+    let start=0;
+    while((start=text.indexOf(name,start))!==-1){
+      protectedMask.fill(1,start,start+name.length);start+=name.length;
+    }
+  }
+  return text.replace(/[.。．](?=[”’"'」』)\]]*(?:\s|$))/gu,(dot,index)=>protectedMask[index]?dot:'');
+}
+async function cloudRewrite(source,names,job,tone) {
   if(!window.cloudLookup)throw Error('계정 연결을 준비 중입니다. 잠시 후 다시 눌러주세요.');
   const parts=[];
   const chunks=cloudChunks(source);
   const fullMask=protectedText(source,names);
-  let offset=0,context='',applied=0,review=0,stopped='',failed=false,completed=0;
+  let offset=0,context='',applied=0,review=0,stopped='',failed=false,completed=0,unchanged=0;
   const total=chunks.filter(part=>part.trim()).length;
   for(const chunk of chunks){
     if(job!==revision)return null;
@@ -295,20 +328,21 @@ async function cloudRewrite(source,names,job) {
     }
     el('status').textContent='AI 변환 '+completed+'/'+total+'구간 · 서버 응답을 기다리고 있습니다…';
     let result;
-    try {result=await window.cloudLookup(text,context,names);}
+    try {result=await window.cloudLookup(text,context,names,tone);}
     catch(error){failed=true;stopped=error.message||'AI 연결에 실패했습니다.';parts.push({text:chunk});continue;}
     completed++;context=text.slice(-200);
-    if(checkedAIResult(text,result,names)){
+    if(result===text){parts.push({text:chunk});unchanged++;}
+    else if(checkedAIResult(text,result,names)){
       const leading=chunk.indexOf(text);
       parts.push({text:chunk.slice(0,leading)},...changedWords(text,result),{text:chunk.slice(leading+text.length)});
       applied++;
     }else{parts.push({text:chunk});review++;}
   }
-  if(!applied)throw Error(stopped || (completed
+  if(!applied && (failed || review))throw Error(stopped || (completed
     ? 'AI 응답을 받았지만 변경이 없거나 보존 검사에 맞지 않아 적용하지 않았습니다. 이름·용어와 원문을 검토해 주세요.'
     : 'AI로 변환된 구간이 없습니다.'));
   return {parts,complete:!failed&&review===0,message:'AI 적용 '+applied+'/'+total+'구간'+
-    (review?' · 검토 필요 '+review+'구간':'')+(stopped?' · 일부 변환 중단 · '+stopped:'')};
+    (unchanged?' · 원문 유지 '+unchanged+'구간':'')+(review?' · 검토 필요 '+review+'구간':'')+(stopped?' · 일부 변환 중단 · '+stopped:'')};
 }
 
 function changeRatio(parts) {
@@ -401,12 +435,13 @@ function clearResult() {
   el('status').textContent='';
 }
 
-for (const id of ['source','names']) el(id).addEventListener('input',clearResult);
+for (const id of ['source','names','tone','removePeriods']) el(id).addEventListener('input',clearResult);
 
 el('revise').onclick=async()=>{
   if(window.transforming)return;
   window.transforming=true;
   el('source').readOnly=el('names').readOnly=true;
+  el('tone').disabled=el('removePeriods').disabled=true;
   el('revise').disabled=true;
   const sourceSnapshot=el('source').value, namesSnapshot=el('names').value;
   const job=revision;
@@ -420,9 +455,14 @@ el('revise').onclick=async()=>{
   el('saveStatus').textContent='';
   try {
     el('status').textContent='AI 서버에 연결하고 있습니다…';
-    const revised=await cloudRewrite(sourceSnapshot,namesSnapshot,job);
+    const revised=await cloudRewrite(sourceSnapshot,namesSnapshot,job,resolveTone(sourceSnapshot,el('tone').value));
     if(!revised)return;
     parts=revised.parts;dictionaryMessage=revised.message;complete=revised.complete;
+    if(el('removePeriods').checked){
+      const output=stripSentencePeriods(parts.map(p=>p.text).join(''),namesSnapshot);
+      parts=changedWords(sourceSnapshot,output);
+      dictionaryMessage+=' · 문장 끝 마침표 제거';
+    }
   } catch(error) {
     if(job===revision){
       el('status').textContent=error.message || '변환에 실패했습니다.';
@@ -433,6 +473,7 @@ el('revise').onclick=async()=>{
     window.transforming=false;
     el('mode').disabled=false;
     el('source').readOnly=el('names').readOnly=false;
+    el('tone').disabled=el('removePeriods').disabled=false;
     el('revise').disabled=!el('source').value.trim();
   }
   if(job!==revision || sourceSnapshot!==el('source').value || namesSnapshot!==el('names').value)return;
@@ -453,6 +494,7 @@ el('revise').onclick=async()=>{
 const SUPABASE_URL = 'https://txwriuyoctzkcvcylffb.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_cPMZ3zGQ8acQJ2VijuP94w_QcjsorGf';
 const get = id => document.getElementById(id);
+let activeSearch='';
 let db, user, signup=false, checked='', current=null, cursor=null, busy=false;
 const accountPattern=/^[a-z0-9_]{4,20}$/;
 const username=()=>get('username').value.trim().toLowerCase();
@@ -509,9 +551,9 @@ const aiErrors={
   ai_connection_failed:'AI 서버 연결에 실패했습니다. 인터넷과 서버 상태를 확인하세요.',
   invalid_input:'문단 또는 보호할 이름 목록이 너무 깁니다. 보호 목록은 4,000자 이내로 입력하세요.',
 };
-window.cloudLookup=async(source,context,names)=>{
+window.cloudLookup=async(source,context,names,tone)=>{
   if(!db || !user)throw Error('로그인이 필요합니다.');
-  const {data,error}=await db.functions.invoke('rewrite-text',{body:{source,context,names}});
+  const {data,error}=await db.functions.invoke('rewrite-text',{body:{source,context,names,tone}});
   if(error){
     let payload;
     try {payload=await error.context?.clone().json();}catch{}
@@ -544,6 +586,7 @@ get('accountForm').onsubmit=e=>{
 function discard() { return !hasChanges || confirm('저장하지 않은 변경을 지우고 이동할까요?') }
 function reset() {
   current=null;
+  get('tone').value='auto';get('removePeriods').checked=false;
   get('source').value=get('names').value='';
   clearResult();
   hasChanges=false;
@@ -552,6 +595,7 @@ function reset() {
 async function showSession(session) {
   if(!session && guestMode)return;
 
+  activeSearch='';get('historySearch').value='';
   user=session?.user||null;
   get('accountGate').hidden=!!user;
   get('application').hidden=!user;
@@ -568,14 +612,26 @@ get('signout').onclick=()=>action('saveStatus',async()=>{
   await showSession(null);
 });
 get('newRecord').onclick=()=>{if(!window.transforming && !busy && discard())reset()};
+get('historySearchForm').onsubmit=event=>{
+  event.preventDefault();
+  if(busy||window.transforming)return;
+  return action('historyStatus',async()=>{
+    activeSearch=get('historySearch').value.trim();
+    await loadHistory(true);
+  });
+};
 get('reloadRecords').onclick=()=>action('saveStatus',()=>loadHistory(true));
 get('moreRecords').onclick=()=>action('saveStatus',()=>loadHistory(false));
 async function loadHistory(first) {
   let query=db.from('lab_history').select('id,title,updated_at').order('id',{ascending:false}).limit(30);
-  if(!first && cursor)query=query.lt('id',cursor);
+  if(activeSearch)query=db.rpc('lab_history_search',{
+    term:activeSearch,before_id:first?null:cursor
+  });
+  else if(!first && cursor)query=query.lt('id',cursor);
   const {data,error}=await query;
-  if(error)throw Error('기록 목록을 불러오지 못했습니다. 로그인 상태와 연결을 확인하세요.');
-  if(first)get('history').replaceChildren();
+  if(error)throw Error(activeSearch?'검색에 실패했습니다. 검색·삭제 설정 SQL과 연결을 확인하세요.':'기록 목록을 불러오지 못했습니다. 로그인 상태와 연결을 확인하세요.');
+  if(first){get('history').replaceChildren();cursor=null;}
+  notice('historyStatus',activeSearch?'검색어 “'+activeSearch+'” · 원문과 수정문에서 찾았습니다.':'전체 기록');
   for(const row of data) {
     const entry=document.createElement('article'),button=document.createElement('button'),date=document.createElement('small');
     button.textContent=row.title;
@@ -591,6 +647,8 @@ async function loadHistory(first) {
       renderParts(data.parts.filter(part=>!part.method));
       get('reviewTools').hidden=!get('result').textContent;
       experimentMethod=meta?.method||'';
+      get('tone').value=meta?.tone||'auto';
+      get('removePeriods').checked=meta?.removePeriods===true;
       get('mode').value='ai';
       updateModeUI();
       notice('status',meta?.summary || '이전 기록 · 변환 방식 미기록');
@@ -598,19 +656,35 @@ async function loadHistory(first) {
       notice('saveStatus','저장된 기록을 열었습니다.');
     });
     date.textContent=new Date(row.updated_at).toLocaleString('ko-KR');
-    entry.append(button,date);get('history').append(entry);
+    const remove=document.createElement('button');
+    remove.type='button';remove.className='delete-record';remove.textContent='삭제';
+    remove.setAttribute('aria-label',row.title+' 기록 삭제');
+    remove.onclick=()=>action('historyStatus',async()=>{
+      const opened=current?.id===row.id;
+      if(!confirm('“'+row.title+'” 기록을 삭제할까요?'+(opened&&hasChanges?' 저장하지 않은 변경도 닫힙니다.':'')))return;
+      let deletion=db.from('lab_history').delete().eq('id',row.id).eq('owner',user.id);
+      if(opened)deletion=deletion.eq('version',current.version);
+      const {data,error}=await deletion.select('id');
+      if(error || !data?.length)throw Error('삭제하지 못했습니다. 다른 기기에서 수정됐다면 다시 열어 확인하세요. 삭제 권한 설정도 확인하세요.');
+      if(opened)reset();
+      await loadHistory(true);
+      notice('historyStatus','기록을 삭제했습니다.');
+    });
+    entry.append(button,date,remove);get('history').append(entry);
   }
-  if(first && !data.length)get('history').textContent='저장된 기록이 없습니다.';
+  if(first && !data.length)get('history').textContent=activeSearch?'일치하는 기록이 없습니다.':'저장된 기록이 없습니다.';
   cursor=data.at(-1)?.id||cursor;
   get('moreRecords').hidden=data.length<30;
 }
 get('saveRecord').onclick=()=>action('saveStatus',async()=>{
   const source=get('source').value;
+  const resultSnapshot=get('result').textContent;
+  const settingsSnapshot=get('tone').value+':'+get('removePeriods').checked;
   if(!source.trim())throw Error('원문을 입력하세요.');
   if(source.length>100000)throw Error('한 기록은 10만 자까지 저장할 수 있습니다.');
   const parts=[...get('result').childNodes].map(node=>node.nodeType===3?{text:node.textContent}:
     {text:node.textContent,original:node.title.replace(/^원래 표현: /,'')});
-  if(experimentMethod)parts.unshift({text:'',method:experimentMethod,summary:get('status').textContent});
+  if(experimentMethod)parts.unshift({text:'',method:experimentMethod,summary:get('status').textContent,tone:get('tone').value,removePeriods:get('removePeriods').checked});
   const record={
     owner:user.id,title:source.trim().slice(0,50),source,
     protected_names:get('names').value,parts,
@@ -620,7 +694,7 @@ get('saveRecord').onclick=()=>action('saveStatus',async()=>{
     db.from('lab_history').insert(record);
   const {data,error}=await query.select().single();
   if(error)throw Error('저장에 실패했습니다. 연결을 확인하세요. 다른 기기에서 수정했다면 새 글로 저장해 주세요.');
-  current=data;hasChanges=get('source').value!==source || get('names').value!==record.protected_names;
+  current=data;hasChanges=get('source').value!==source || get('names').value!==record.protected_names || get('result').textContent!==resultSnapshot || settingsSnapshot!==get('tone').value+':'+get('removePeriods').checked;
   notice('saveStatus',hasChanges?'이전 내용이 저장됐습니다. 새 수정 사항을 저장하세요.':'계정에 저장했습니다.');
   await loadHistory(true);
 });
