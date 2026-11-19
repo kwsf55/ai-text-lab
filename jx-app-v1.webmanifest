@@ -1,0 +1,25 @@
+{
+  "id": "./",
+  "name": "JUDGEMENT X · 저지먼트 엑스",
+  "short_name": "JUDGEMENT X",
+  "lang": "ko",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#100c0e",
+  "theme_color": "#100c0e",
+  "icons": [
+    {
+      "src": "./jx-icon-192-v1.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./jx-icon-512-v1.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}
